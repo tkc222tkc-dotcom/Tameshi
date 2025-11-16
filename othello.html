@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>AI Othello</title>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background: #222;
+        color: white;
+        text-align: center;
+    }
+    h1 { margin-top: 20px; }
+    a { color: #ccc; text-decoration: none; }
+    #board {
+        display: grid;
+        grid-template-columns: repeat(8, 60px);
+        gap: 4px;
+        justify-content: center;
+        margin-top: 20px;
+    }
+    .cell {
+        width: 60px;
+        height: 60px;
+        background: #0c5a18;
+        border-radius: 4px;
+        position: relative;
+        cursor: pointer;
+    }
+    .disc {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        position: absolute;
+        top: 6px;
+        left: 6px;
+    }
+    .black { background: black; }
+    .white { background: white; }
+    #info {
+        margin-top: 15px;
+        font-size: 20px;
+    }
+    button {
+        margin-top: 20px;
+        padding: 10px 20px;
+        font-size: 18px;
+    }
+</style>
+</head>
+<body>
+<h1>Othello - AI対戦（難易度：普通）</h1>
+<a href="index.html">← 戻る</a>
+<div id="info"></div>
+<div id="board"></div>
+<button onclick="restart()">リスタート</button>
+
+<script>
+const boardElement = document.getElementById("board");
+const info = document.getElementById("info");
+let board = [];
+
+const EMPTY = 0;
+const BLACK = 1;
+const WHITE = -1;
+
+const directions = [
+    [1,0],[0,1],[-1,0],[0,-1],
+    [1,1],[1,-1],[-1,1],[-1,-1]
+];
+
+function initBoard() {
+    board = Array.from({ length: 8 }, () => Array(8).fill(EMPTY));
+
+    board[3][3] = WHITE;
+    board[4][4] = WHITE;
+    board[3][4] = BLACK;
+    board[4][3] = BLACK;
+
+    render();
+    info.innerText = "あなた（黒）の番です";
+}
+
+function render() {
+    boardElement.innerHTML = "";
+    for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+            const cell = document.createElement("div");
+            cell.className = "cell";
+            cell.dataset.x = x;
+            cell.dataset.y = y;
+
+            if (board[y][x] !== EMPTY) {
+                const disc = document.createElement("div");
+                disc.className = "disc " + (board[y][x] === BLACK ? "black" : "white");
+                cell.appendChild(disc);
+            }
+
+            cell.onclick = () => playerMove(x, y);
+            boardElement.appendChild(cell);
+        }
+    }
+}
+
+function validMoves(color) {
+    let moves = [];
+
+    for (let y=0; y<8; y++) {
+        for (let x=0; x<8; x++) {
+            if (board[y][x] !== EMPTY) continue;
+
+            if (getFlips(x, y, color).length > 0) {
+                moves.push([x, y]);
+            }
+        }
+    }
+    return moves;
+}
+
+function getFlips(x, y, color) {
+    let flips = [];
+
+    for (const [dx, dy] of directions) {
+        let nx = x + dx;
+        let ny = y + dy;
+        let tmp = [];
+
+        while (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
+            if (board[ny][nx] === -color) {
+                tmp.push([nx, ny]);
+            } else if (board[ny][nx] === color) {
+                flips.push(...tmp);
+                break;
+            } else break;
+
+            nx += dx;
+            ny += dy;
+        }
+    }
+
+    return flips;
+}
+
+function placeStone(x, y, color) {
+    const flips = getFlips(x, y, color);
+    if (flips.length === 0) return false;
+
+    board[y][x] = color;
+    for (const [fx, fy] of flips) {
+        board[fy][fx] = color;
+    }
+    return true;
+}
+
+function playerMove(x, y) {
+    if (board[y][x] !== EMPTY) return;
+    
+    if (placeStone(x, y, BLACK)) {
+        render();
+        
+        if (checkGameOver()) return;
+        
+        setTimeout(aiTurn, 300);
+    }
+}
+
+function aiTurn() {
+    if (validMoves(WHITE).length === 0) {
+        if (validMoves(BLACK).length === 0) {
+            checkGameOver();
+        } else {
+            info.innerText = "AIがパス → あなたの番";
+        }
+        return;
+    }
+
+    info.innerText = "AI思考中…";
+
+    let bestScore = -9999;
+    let bestMove = null;
+
+    for (const [x, y] of validMoves(WHITE)) {
+        let copy = JSON.parse(JSON.stringify(board));
+        simulatePlace(copy, x, y, WHITE);
+        let score = evaluate(copy);
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestMove = [x, y];
+        }
+    }
+
+    if (bestMove) {
+        placeStone(bestMove[0], bestMove[1], WHITE);
+    }
+
+    render();
+    
+    if (checkGameOver()) return;
+    
+    if (validMoves(BLACK).length === 0) {
+        info.innerText = "あなたがパス → AIの番";
+        setTimeout(aiTurn, 500);
+    } else {
+        info.innerText = "あなた（黒）の番です";
+    }
+}
+
+function simulatePlace(bd, x, y, color) {
+    const flips = getFlipsSim(bd, x, y, color);
+    bd[y][x] = color;
+    for (const [fx, fy] of flips) bd[fy][fx] = color;
+}
+
+function getFlipsSim(bd, x, y, color) {
+    let flips = [];
+    for (const [dx, dy] of directions) {
+        let nx = x + dx;
+        let ny = y + dy;
+        let tmp = [];
+        while (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
+            if (bd[ny][nx] === -color) tmp.push([nx, ny]);
+            else if (bd[ny][nx] === color) {
+                flips.push(...tmp);
+                break;
+            } else break;
+
+            nx += dx; ny += dy;
+        }
+    }
+    return flips;
+}
+
+function evaluate(bd) {
+    let score = 0;
+
+    const weights = [
+        [120, -20, 20,  5,  5, 20, -20,120],
+        [-20, -40, -5, -5, -5, -5, -40,-20],
+        [20,  -5, 15,  3,  3, 15,  -5, 20],
+        [5,   -5,  3,  3,  3,  3,  -5,  5],
+        [5,   -5,  3,  3,  3,  3,  -5,  5],
+        [20,  -5, 15,  3,  3, 15,  -5, 20],
+        [-20, -40, -5, -5, -5, -5, -40,-20],
+        [120, -20, 20,  5,  5, 20, -20,120]
+    ];
+
+    for (let y=0; y<8; y++) {
+        for (let x=0; x<8; x++) {
+            if (bd[y][x] === WHITE) score += weights[y][x];
+            if (bd[y][x] === BLACK) score -= weights[y][x];
+        }
+    }
+
+    return score;
+}
+
+function checkGameOver() {
+    const blackMoves = validMoves(BLACK);
+    const whiteMoves = validMoves(WHITE);
+    
+    if (blackMoves.length === 0 && whiteMoves.length === 0) {
+        let blackCount = 0;
+        let whiteCount = 0;
+        
+        for (let y = 0; y < 8; y++) {
+            for (let x = 0; x < 8; x++) {
+                if (board[y][x] === BLACK) blackCount++;
+                if (board[y][x] === WHITE) whiteCount++;
+            }
+        }
+        
+        if (blackCount > whiteCount) {
+            info.innerText = `ゲーム終了！あなた（黒）の勝ち！ ${blackCount} - ${whiteCount}`;
+        } else if (whiteCount > blackCount) {
+            info.innerText = `ゲーム終了！AI（白）の勝ち！ ${whiteCount} - ${blackCount}`;
+        } else {
+            info.innerText = `ゲーム終了！引き分け！ ${blackCount} - ${whiteCount}`;
+        }
+        return true;
+    }
+    return false;
+}
+
+function restart() {
+    initBoard();
+}
+
+initBoard();
+</script>
+</body>
+</html>

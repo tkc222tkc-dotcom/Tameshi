@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>3D 電車運転シミュレーター</title>
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+        color: white;
+        font-family: 'Arial', sans-serif;
+        overflow: hidden;
+    }
+    #game-container {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+    }
+    canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+    }
+    #hud {
+        position: absolute;
+        bottom: 20px;
+        left: 20px;
+        right: 20px;
+        background: rgba(0,0,0,0.8);
+        padding: 20px;
+        border-radius: 10px;
+        border: 2px solid rgba(255,255,255,0.3);
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 20px;
+    }
+    .hud-item {
+        text-align: center;
+    }
+    .hud-label {
+        font-size: 12px;
+        color: #aaa;
+        margin-bottom: 5px;
+    }
+    .hud-value {
+        font-size: 28px;
+        font-weight: bold;
+        color: #0f0;
+        text-shadow: 0 0 10px rgba(0,255,0,0.5);
+    }
+    #controls {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        background: rgba(0,0,0,0.8);
+        padding: 15px;
+        border-radius: 10px;
+        min-width: 250px;
+    }
+    .control-row {
+        margin: 12px 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .control-label {
+        min-width: 80px;
+        font-size: 14px;
+    }
+    input[type="range"] {
+        flex: 1;
+        height: 8px;
+    }
+    .control-value {
+        min-width: 40px;
+        font-size: 14px;
+        color: #0f0;
+    }
+    #title {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        font-size: 24px;
+        font-weight: bold;
+        text-shadow: 2px 2px 4px #000;
+    }
+    #backBtn {
+        position: absolute;
+        top: 60px;
+        left: 20px;
+        color: #ccc;
+        text-decoration: none;
+        font-size: 16px;
+        text-shadow: 2px 2px 4px #000;
+    }
+    button {
+        padding: 8px 20px;
+        font-size: 14px;
+        cursor: pointer;
+        background: linear-gradient(135deg, #2a7 0%, #1a5 100%);
+        color: white;
+        border: none;
+        border-radius: 5px;
+        margin-top: 10px;
+        width: 100%;
+    }
+    button:hover {
+        background: linear-gradient(135deg, #3b8 0%, #2b6 100%);
+    }
+    .warning { color: #fa0; }
+    .good { color: #2f4; }
+</style>
+</head>
+<body>
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="title">🚄 3D 電車運転シミュレーター</div>
+    <a id="backBtn" href="index.html">← 戻る</a>
+    
+    <div id="controls">
+        <div class="control-row">
+            <span class="control-label">スロットル:</span>
+            <input type="range" id="throttle" min="0" max="100" value="0">
+            <span class="control-value" id="throttleValue">0%</span>
+        </div>
+        <div class="control-row">
+            <span class="control-label">ブレーキ:</span>
+            <input type="range" id="brake" min="0" max="100" value="0">
+            <span class="control-value" id="brakeValue">0%</span>
+        </div>
+        <button onclick="restart()">リスタート</button>
+    </div>
+    
+    <div id="hud">
+        <div class="hud-item">
+            <div class="hud-label">速度</div>
+            <div class="hud-value" id="speed">0</div>
+            <div class="hud-label">km/h</div>
+        </div>
+        <div class="hud-item">
+            <div class="hud-label">距離</div>
+            <div class="hud-value" id="distance">0</div>
+            <div class="hud-label">m</div>
+        </div>
+        <div class="hud-item">
+            <div class="hud-label">次の駅</div>
+            <div class="hud-value" style="font-size: 20px;" id="nextStation">駅1</div>
+            <div class="hud-label" id="stationDist">2000m</div>
+        </div>
+        <div class="hud-item">
+            <div class="hud-label">乗客満足度</div>
+            <div class="hud-value good" id="satisfaction">100</div>
+            <div class="hud-label">%</div>
+        </div>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+});
+
+const SEGMENT_LENGTH = 200;
+const CAMERA_DEPTH = 0.84;
+const TRACK_WIDTH = 2000;
+const RAIL_WIDTH = 120;
+
+let gameRunning = false;
+let speed = 0;
+let targetSpeed = 0;
+let maxSpeed = 120;
+let position = 0;
+let satisfaction = 100;
+let currentStationIndex = 0;
+
+class TrackSegment {
+    constructor(index) {
+        this.index = index;
+        this.curve = 0;
+        this.z = index * SEGMENT_LENGTH;
+        this.y = Math.sin(index * 0.015) * 300;
+    }
+}
+
+class Station {
+    constructor(z, name) {
+        this.z = z;
+        this.name = name;
+        this.platformHeight = 80;
+        this.platformLength = 2000;
+        this.reached = false;
+    }
+}
+
+class Building {
+    constructor(z, side) {
+        this.z = z;
+        this.side = side;
+        this.height = 200 + Math.random() * 400;
+        this.width = 120 + Math.random() * 180;
+        this.color = ['#555', '#666', '#777'][Math.floor(Math.random() * 3)];
+    }
+}
+
+class Tree {
+    constructor(z, side, offset) {
+        this.z = z;
+        this.side = side;
+        this.offset = offset;
+        this.height = 80 + Math.random() * 60;
+    }
+}
+
+class Mountain {
+    constructor(index, side) {
+        this.x = index * 500;
+        this.side = side;
+        this.height = 400 + Math.random() * 300;
+        this.width = 250 + Math.random() * 200;
+        this.color = side < 0 ? '#5a7d5a' : '#4a6d4a';
+    }
+}
+
+let segments = [];
+let stations = [];
+let buildings = [];
+let trees = [];
+let mountains = [];
+
+function init() {
+    speed = 0;
+    targetSpeed = 0;
+    position = 0;
+    satisfaction = 100;
+    currentStationIndex = 0;
+    segments = [];
+    stations = [];
+    buildings = [];
+    trees = [];
+    mountains = [];
+    gameRunning = true;
+    
+    for (let i = 0; i < 8; i++) {
+        mountains.push(new Mountain(i, -1));
+        mountains.push(new Mountain(i, 1));
+    }
+    
+    for (let i = 0; i < 600; i++) {
+        const seg = new TrackSegment(i);
+        
+        if (i > 50 && i % 80 === 0) {
+            const curveStrength = (Math.random() - 0.5) * 0.0005;
+            for (let j = 0; j < 40; j++) {
+                if (segments[i + j]) {
+                    segments[i + j].curve = curveStrength;
+                }
+            }
+        }
+        
+        segments.push(seg);
+        
+        if (i % 10 === 0) {
+            buildings.push(new Building(i * SEGMENT_LENGTH, -1));
+            buildings.push(new Building(i * SEGMENT_LENGTH, 1));
+        }
+        
+        if (i % 8 === 0) {
+            trees.push(new Tree(i * SEGMENT_LENGTH, -1, 0.4 + Math.random() * 0.4));
+            trees.push(new Tree(i * SEGMENT_LENGTH, 1, 0.4 + Math.random() * 0.4));
+        }
+    }
+    
+    stations.push(new Station(100 * SEGMENT_LENGTH, '駅1'));
+    stations.push(new Station(250 * SEGMENT_LENGTH, '駅2'));
+    stations.push(new Station(400 * SEGMENT_LENGTH, '駅3'));
+    stations.push(new Station(550 * SEGMENT_LENGTH, '駅4 (終点)'));
+    
+    updateDisplay();
+    requestAnimationFrame(gameLoop);
+}
+
+let lastTime = 0;
+
+function gameLoop(time) {
+    if (!gameRunning) return;
+    
+    const dt = Math.min((time - lastTime) / 1000, 0.1);
+    lastTime = time;
+    
+    if (dt > 0) {
+        update(dt);
+        render();
+    }
+    
+    requestAnimationFrame(gameLoop);
+}
+
+function update(dt) {
+    const throttle = parseInt(document.getElementById('throttle').value);
+    const brake = parseInt(document.getElementById('brake').value);
+    
+    const maxAcceleration = 12;
+    const brakeForce = 20;
+    
+    targetSpeed = (throttle / 100) * maxSpeed;
+    
+    if (brake > 0) {
+        speed = Math.max(0, speed - brakeForce * (brake / 100) * dt);
+    } else {
+        if (speed < targetSpeed) {
+            speed = Math.min(speed + maxAcceleration * dt, targetSpeed);
+        } else if (speed > targetSpeed) {
+            speed = Math.max(speed - maxAcceleration * dt * 0.5, targetSpeed);
+        }
+    }
+    
+    position += speed * dt * 10;
+    
+    const accel = Math.abs((speed - (lastSpeed || speed)) / dt);
+    lastSpeed = speed;
+    
+    if (accel > 5) {
+        satisfaction = Math.max(0, satisfaction - accel * 0.5 * dt);
+    } else if (satisfaction < 100) {
+        satisfaction = Math.min(100, satisfaction + 2 * dt);
+    }
+    
+    const nextStation = stations[currentStationIndex];
+    if (nextStation && !nextStation.reached) {
+        const distToStation = nextStation.z - position;
+        if (distToStation <= 0 && speed < 5) {
+            nextStation.reached = true;
+            currentStationIndex++;
+            satisfaction = Math.min(100, satisfaction + 10);
+            
+            if (currentStationIndex >= stations.length) {
+                alert(`運転お疲れ様でした！\n乗客満足度: ${Math.floor(satisfaction)}%`);
+                gameRunning = false;
+            }
+        }
+    }
+    
+    updateDisplay();
+}
+
+let lastSpeed = 0;
+
+function render() {
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    const gradient = ctx.createLinearGradient(0, 0, 0, height);
+    gradient.addColorStop(0, '#87CEEB');
+    gradient.addColorStop(0.4, '#B0D4E3');
+    gradient.addColorStop(1, '#a8d5a8');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+    
+    ctx.fillStyle = '#FFD700';
+    ctx.beginPath();
+    ctx.arc(width * 0.85, height * 0.12, 35, 0, Math.PI * 2);
+    ctx.fill();
+    
+    mountains.forEach(mountain => {
+        const mountainX = mountain.side < 0 ? 
+            (mountain.x - position * 0.03) % (width / 2) :
+            width / 2 + (mountain.x - position * 0.03) % (width / 2);
+        
+        const peakY = height * 0.35 - mountain.height * 0.25;
+        const baseY = height * 0.35;
+        
+        ctx.fillStyle = mountain.color;
+        ctx.beginPath();
+        ctx.moveTo(mountainX - mountain.width / 2, baseY);
+        ctx.lineTo(mountainX, peakY);
+        ctx.lineTo(mountainX + mountain.width / 2, baseY);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.beginPath();
+        ctx.moveTo(mountainX - 25, peakY + 30);
+        ctx.lineTo(mountainX, peakY);
+        ctx.lineTo(mountainX + 20, peakY + 35);
+        ctx.closePath();
+        ctx.fill();
+    });
+    
+    const baseSegment = Math.floor(position / SEGMENT_LENGTH);
+    let curveOffset = 0;
+    
+    for (let n = 120; n >= 0; n--) {
+        const segment = segments[baseSegment + n];
+        if (!segment) continue;
+        
+        const projectedZ = n * SEGMENT_LENGTH;
+        if (projectedZ <= 1) continue;
+        
+        const scale = CAMERA_DEPTH / projectedZ;
+        const projectedY = height * 0.5 + segment.y * scale;
+        const projectedW = scale * TRACK_WIDTH;
+        
+        curveOffset += segment.curve * SEGMENT_LENGTH;
+        const projectedX = width / 2 - projectedW - curveOffset * width * scale * 0.3;
+        
+        const fog = Math.min(1, projectedZ / (SEGMENT_LENGTH * 80));
+        
+        const grassBrightness = 45 + fog * 25;
+        ctx.fillStyle = `hsl(120, 40%, ${grassBrightness}%)`;
+        ctx.fillRect(0, projectedY, width, height - projectedY);
+        
+        const ballastBrightness = 35 + fog * 20;
+        ctx.fillStyle = `hsl(30, 20%, ${ballastBrightness}%)`;
+        ctx.fillRect(projectedX, projectedY, projectedW * 2, height - projectedY);
+        
+        if (n % 4 === 0) {
+            const sleeperWidth = projectedW * 2.2;
+            const sleeperHeight = scale * 30;
+            ctx.fillStyle = `rgba(80, 50, 20, ${0.95 - fog})`;
+            ctx.fillRect(projectedX - projectedW * 0.1, projectedY, sleeperWidth, sleeperHeight);
+            
+            ctx.fillStyle = `rgba(60, 35, 15, ${0.8 - fog})`;
+            ctx.fillRect(projectedX - projectedW * 0.1, projectedY + sleeperHeight * 0.7, sleeperWidth, sleeperHeight * 0.3);
+        }
+        
+        const railOffset = projectedW * 0.4;
+        const railWidth = scale * 25;
+        const railHeight = scale * 18;
+        
+        ctx.fillStyle = `rgba(50, 50, 50, ${1 - fog})`;
+        ctx.fillRect(projectedX + projectedW - railOffset - railWidth / 2, projectedY, railWidth, height - projectedY);
+        ctx.fillRect(projectedX + projectedW + railOffset - railWidth / 2, projectedY, railWidth, height - projectedY);
+        
+        ctx.fillStyle = `rgba(100, 100, 100, ${0.9 - fog})`;
+        ctx.fillRect(projectedX + projectedW - railOffset - railWidth / 2, projectedY, railWidth, railHeight);
+        ctx.fillRect(projectedX + projectedW + railOffset - railWidth / 2, projectedY, railWidth, railHeight);
+        
+        if (n % 2 === 0) {
+            ctx.fillStyle = `rgba(120, 120, 120, ${0.7 - fog})`;
+            const highlightWidth = scale * 4;
+            ctx.fillRect(projectedX + projectedW - railOffset, projectedY, highlightWidth, railHeight);
+            ctx.fillRect(projectedX + projectedW + railOffset, projectedY, highlightWidth, railHeight);
+        }
+        
+        trees.forEach(tree => {
+            const treeZ = tree.z - position;
+            if (Math.abs(treeZ - projectedZ) < SEGMENT_LENGTH / 2) {
+                const tScale = CAMERA_DEPTH / treeZ;
+                const tHeight = tScale * tree.height;
+                const tX = tree.side < 0 ? 
+                    projectedX - tScale * 150 * tree.offset : 
+                    projectedX + projectedW * 2 + tScale * 150 * tree.offset;
+                const tY = projectedY - tHeight;
+                
+                if (tScale > 0.01 && treeZ > 0) {
+                    const treeFog = Math.min(1, treeZ / (SEGMENT_LENGTH * 80));
+                    ctx.fillStyle = `rgba(101, 67, 33, ${1 - treeFog})`;
+                    ctx.fillRect(tX - tScale * 8, tY + tHeight * 0.6, tScale * 16, tHeight * 0.4);
+                    ctx.fillStyle = `rgba(34, 139, 34, ${1 - treeFog})`;
+                    ctx.beginPath();
+                    ctx.arc(tX, tY + tHeight * 0.35, tScale * 35, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        });
+        
+        buildings.forEach(building => {
+            const buildingZ = building.z - position;
+            if (Math.abs(buildingZ - projectedZ) < SEGMENT_LENGTH) {
+                const bScale = CAMERA_DEPTH / buildingZ;
+                const bHeight = bScale * building.height;
+                const bWidth = bScale * building.width;
+                const bX = building.side < 0 ? 
+                    projectedX - bWidth - bScale * 250 : 
+                    projectedX + projectedW * 2 + bScale * 250;
+                const bY = projectedY - bHeight;
+                
+                if (bScale > 0.01 && buildingZ > 0) {
+                    const bFog = Math.min(1, buildingZ / (SEGMENT_LENGTH * 80));
+                    
+                    ctx.globalAlpha = 1 - bFog;
+                    ctx.fillStyle = building.color;
+                    ctx.fillRect(bX, bY, bWidth, bHeight);
+                    
+                    ctx.fillStyle = '#444';
+                    const floors = Math.floor(building.height / 40);
+                    for (let f = 0; f < floors; f++) {
+                        const wY = bY + f * bScale * 40 + bScale * 10;
+                        ctx.fillRect(bX + bScale * 15, wY, bScale * 20, bScale * 25);
+                        ctx.fillRect(bX + bWidth - bScale * 35, wY, bScale * 20, bScale * 25);
+                    }
+                    
+                    ctx.globalAlpha = 1;
+                }
+            }
+        });
+        
+        stations.forEach(station => {
+            const stationZ = station.z - position;
+            if (Math.abs(stationZ - projectedZ) < SEGMENT_LENGTH * 2) {
+                const sScale = CAMERA_DEPTH / stationZ;
+                const platformHeight = sScale * station.platformHeight;
+                const platformWidth = sScale * 300;
+                
+                const sX1 = projectedX - platformWidth - sScale * 50;
+                const sX2 = projectedX + projectedW * 2 + sScale * 50;
+                const sY = projectedY - platformHeight;
+                
+                if (sScale > 0.01 && stationZ > -station.platformLength / 2 && stationZ < station.platformLength) {
+                    const sFog = Math.min(1, Math.abs(stationZ) / (SEGMENT_LENGTH * 80));
+                    
+                    ctx.globalAlpha = 1 - sFog;
+                    
+                    ctx.fillStyle = '#888';
+                    ctx.fillRect(sX1, sY, platformWidth, platformHeight);
+                    ctx.fillRect(sX2, sY, platformWidth, platformHeight);
+                    
+                    ctx.fillStyle = '#666';
+                    for (let i = 0; i < 5; i++) {
+                        const pillX1 = sX1 + i * platformWidth / 5;
+                        const pillX2 = sX2 + i * platformWidth / 5;
+                        ctx.fillRect(pillX1, sY, sScale * 15, platformHeight);
+                        ctx.fillRect(pillX2, sY, sScale * 15, platformHeight);
+                    }
+                    
+                    if (stationZ > 0 && stationZ < 500) {
+                        ctx.fillStyle = '#fff';
+                        ctx.font = `${sScale * 60}px Arial`;
+                        ctx.textAlign = 'center';
+                        ctx.fillText(station.name, width / 2, sY - sScale * 50);
+                    }
+                    
+                    ctx.globalAlpha = 1;
+                }
+            }
+        });
+    }
+    
+    const cabHeight = height * 0.25;
+    const cabY = height - cabHeight;
+    
+    ctx.fillStyle = 'rgba(40, 40, 40, 0.95)';
+    ctx.fillRect(0, cabY, width, cabHeight);
+    
+    ctx.fillStyle = 'rgba(30, 30, 30, 0.98)';
+    ctx.fillRect(0, height - 80, width, 80);
+    
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(width * 0.15, cabY + 20, width * 0.7, cabHeight - 100);
+    
+    ctx.fillStyle = 'rgba(100, 150, 200, 0.15)';
+    ctx.fillRect(width * 0.15, cabY + 20, width * 0.7, cabHeight - 100);
+    
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(width * 0.5, cabY + 20);
+    ctx.lineTo(width * 0.5, cabY + cabHeight - 80);
+    ctx.stroke();
+    
+    ctx.fillStyle = '#222';
+    ctx.fillRect(width * 0.2, height - 70, 120, 60);
+    ctx.fillRect(width * 0.4, height - 70, 120, 60);
+    ctx.fillRect(width * 0.6, height - 70, 120, 60);
+    
+    ctx.strokeStyle = '#0f0';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(width * 0.2, height - 70, 120, 60);
+    ctx.strokeRect(width * 0.4, height - 70, 120, 60);
+    ctx.strokeRect(width * 0.6, height - 70, 120, 60);
+    
+    ctx.fillStyle = '#0f0';
+    ctx.font = '14px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('SPEED', width * 0.26, height - 55);
+    ctx.font = '20px monospace';
+    ctx.fillText(Math.floor(speed) + ' km/h', width * 0.26, height - 30);
+    
+    ctx.font = '14px monospace';
+    ctx.fillText('POWER', width * 0.46, height - 55);
+    const throttle = parseInt(document.getElementById('throttle').value);
+    ctx.font = '20px monospace';
+    ctx.fillText(throttle + '%', width * 0.46, height - 30);
+    
+    ctx.font = '14px monospace';
+    ctx.fillText('BRAKE', width * 0.66, height - 55);
+    const brake = parseInt(document.getElementById('brake').value);
+    ctx.font = '20px monospace';
+    ctx.fillText(brake + '%', width * 0.66, height - 30);
+    
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.fillRect(0, cabY, width * 0.15, cabHeight);
+    ctx.fillRect(width * 0.85, cabY, width * 0.15, cabHeight);
+    
+    ctx.fillStyle = '#333';
+    for (let i = 0; i < 3; i++) {
+        ctx.fillRect(width * 0.02 + i * 35, cabY + 30 + i * 50, 30, 40);
+        ctx.fillRect(width - width * 0.02 - 30 - i * 35, cabY + 30 + i * 50, 30, 40);
+    }
+}
+
+function updateDisplay() {
+    document.getElementById('speed').textContent = Math.floor(speed);
+    document.getElementById('distance').textContent = Math.floor(position / 10);
+    
+    const throttle = parseInt(document.getElementById('throttle').value);
+    const brake = parseInt(document.getElementById('brake').value);
+    document.getElementById('throttleValue').textContent = throttle + '%';
+    document.getElementById('brakeValue').textContent = brake + '%';
+    
+    const nextStation = stations[currentStationIndex];
+    if (nextStation) {
+        document.getElementById('nextStation').textContent = nextStation.name;
+        const dist = Math.max(0, Math.floor((nextStation.z - position) / 10));
+        document.getElementById('stationDist').textContent = dist + 'm';
+    } else {
+        document.getElementById('nextStation').textContent = '終点';
+        document.getElementById('stationDist').textContent = '-';
+    }
+    
+    const satEl = document.getElementById('satisfaction');
+    satEl.textContent = Math.floor(satisfaction);
+    if (satisfaction > 70) {
+        satEl.className = 'hud-value good';
+    } else if (satisfaction > 40) {
+        satEl.className = 'hud-value warning';
+    } else {
+        satEl.className = 'hud-value';
+    }
+}
+
+function restart() {
+    init();
+}
+
+document.getElementById('throttle').addEventListener('input', () => {
+    updateDisplay();
+});
+
+document.getElementById('brake').addEventListener('input', () => {
+    updateDisplay();
+});
+
+init();
+</script>
+</body>
+</html>

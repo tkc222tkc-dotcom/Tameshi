@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>スロットマシン</title>
+<style>
+    body {
+        margin: 0;
+        padding: 20px;
+        background: #222;
+        color: white;
+        font-family: Arial, sans-serif;
+        text-align: center;
+    }
+    h1 { margin: 10px 0; }
+    a { color: #ccc; text-decoration: none; }
+    #slot-machine {
+        background: linear-gradient(135deg, #8B0000 0%, #DC143C 100%);
+        border: 10px solid #FFD700;
+        border-radius: 20px;
+        padding: 40px;
+        display: inline-block;
+        margin: 30px auto;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+    }
+    #reels {
+        display: flex;
+        gap: 20px;
+        justify-content: center;
+        background: #111;
+        padding: 20px;
+        border-radius: 10px;
+        margin-bottom: 30px;
+    }
+    .reel {
+        width: 120px;
+        height: 120px;
+        background: white;
+        border: 5px solid #333;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 70px;
+        overflow: hidden;
+        position: relative;
+    }
+    .reel-symbol {
+        transition: transform 0.1s;
+    }
+    .reel.spinning .reel-symbol {
+        animation: spin 0.1s linear infinite;
+    }
+    @keyframes spin {
+        0% { transform: translateY(0); }
+        100% { transform: translateY(-120px); }
+    }
+    #info {
+        display: flex;
+        justify-content: center;
+        gap: 40px;
+        margin: 20px 0;
+        font-size: 24px;
+    }
+    .info-item {
+        background: #000;
+        padding: 15px 30px;
+        border-radius: 10px;
+        border: 2px solid #FFD700;
+    }
+    .info-label {
+        font-size: 14px;
+        color: #FFD700;
+        margin-bottom: 5px;
+    }
+    .info-value {
+        font-weight: bold;
+        color: #fff;
+    }
+    #spin-btn {
+        background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+        color: #8B0000;
+        font-size: 28px;
+        font-weight: bold;
+        padding: 20px 60px;
+        border: none;
+        border-radius: 50px;
+        cursor: pointer;
+        box-shadow: 0 5px 20px rgba(255,215,0,0.5);
+        transition: transform 0.2s;
+    }
+    #spin-btn:hover:not(:disabled) {
+        transform: scale(1.05);
+    }
+    #spin-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+    #message {
+        margin-top: 20px;
+        font-size: 24px;
+        font-weight: bold;
+        min-height: 40px;
+        color: #FFD700;
+    }
+    .win { color: #2f4; animation: pulse 0.5s ease-in-out 3; }
+    @keyframes pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.1); }
+    }
+    .payout-table {
+        margin-top: 30px;
+        background: #333;
+        padding: 20px;
+        border-radius: 10px;
+        display: inline-block;
+    }
+    .payout-table h3 {
+        margin: 0 0 15px;
+        color: #FFD700;
+    }
+    .payout-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 30px;
+        margin: 8px 0;
+        font-size: 18px;
+    }
+</style>
+</head>
+<body>
+<h1>🎰 スロットマシン</h1>
+<a href="index.html">← 戻る</a>
+
+<div id="slot-machine">
+    <div id="info">
+        <div class="info-item">
+            <div class="info-label">クレジット</div>
+            <div class="info-value" id="credits">1000</div>
+        </div>
+        <div class="info-item">
+            <div class="info-label">ベット</div>
+            <div class="info-value">100</div>
+        </div>
+    </div>
+    
+    <div id="reels">
+        <div class="reel"><span class="reel-symbol" id="reel1">🍒</span></div>
+        <div class="reel"><span class="reel-symbol" id="reel2">🍒</span></div>
+        <div class="reel"><span class="reel-symbol" id="reel3">🍒</span></div>
+    </div>
+    
+    <button id="spin-btn" onclick="spin()">スピン！</button>
+    
+    <div id="message"></div>
+</div>
+
+<div class="payout-table">
+    <h3>配当表</h3>
+    <div class="payout-row">
+        <span>🍒🍒🍒</span>
+        <span>×50</span>
+    </div>
+    <div class="payout-row">
+        <span>🍋🍋🍋</span>
+        <span>×30</span>
+    </div>
+    <div class="payout-row">
+        <span>🍊🍊🍊</span>
+        <span>×20</span>
+    </div>
+    <div class="payout-row">
+        <span>🍇🍇🍇</span>
+        <span>×15</span>
+    </div>
+    <div class="payout-row">
+        <span>⭐⭐⭐</span>
+        <span>×10</span>
+    </div>
+    <div class="payout-row">
+        <span>7️⃣7️⃣7️⃣</span>
+        <span>×100 (ジャックポット!)</span>
+    </div>
+    <div class="payout-row">
+        <span>Any 2 同じ</span>
+        <span>×2</span>
+    </div>
+</div>
+
+<script>
+const symbols = ['🍒', '🍋', '🍊', '🍇', '⭐', '7️⃣'];
+const BET_AMOUNT = 100;
+let credits = 1000;
+let spinning = false;
+
+const payouts = {
+    '🍒🍒🍒': 50,
+    '🍋🍋🍋': 30,
+    '🍊🍊🍊': 20,
+    '🍇🍇🍇': 15,
+    '⭐⭐⭐': 10,
+    '7️⃣7️⃣7️⃣': 100
+};
+
+function updateDisplay() {
+    document.getElementById('credits').textContent = credits;
+}
+
+function spin() {
+    if (spinning) return;
+    if (credits < BET_AMOUNT) {
+        document.getElementById('message').textContent = 'クレジット不足！';
+        document.getElementById('message').className = '';
+        return;
+    }
+    
+    credits -= BET_AMOUNT;
+    updateDisplay();
+    spinning = true;
+    document.getElementById('spin-btn').disabled = true;
+    document.getElementById('message').textContent = '';
+    
+    const reels = [
+        document.getElementById('reel1'),
+        document.getElementById('reel2'),
+        document.getElementById('reel3')
+    ];
+    
+    reels.forEach((reel, index) => {
+        reel.parentElement.classList.add('spinning');
+        
+        let spinCount = 0;
+        const spinInterval = setInterval(() => {
+            reel.textContent = symbols[Math.floor(Math.random() * symbols.length)];
+            spinCount++;
+            
+            if (spinCount > 20 + index * 10) {
+                clearInterval(spinInterval);
+                reel.parentElement.classList.remove('spinning');
+                
+                const finalSymbol = symbols[Math.floor(Math.random() * symbols.length)];
+                reel.textContent = finalSymbol;
+                
+                if (index === 2) {
+                    setTimeout(checkWin, 300);
+                }
+            }
+        }, 100);
+    });
+}
+
+function checkWin() {
+    const results = [
+        document.getElementById('reel1').textContent,
+        document.getElementById('reel2').textContent,
+        document.getElementById('reel3').textContent
+    ];
+    
+    const key = results.join('');
+    let winAmount = 0;
+    let message = '';
+    
+    if (payouts[key]) {
+        winAmount = BET_AMOUNT * payouts[key];
+        if (key === '7️⃣7️⃣7️⃣') {
+            message = '🎉 ジャックポット！ +' + winAmount + ' クレジット！ 🎉';
+        } else {
+            message = '🎊 勝利！ +' + winAmount + ' クレジット！';
+        }
+    } else if (results[0] === results[1] || results[1] === results[2] || results[0] === results[2]) {
+        winAmount = BET_AMOUNT * 2;
+        message = '✨ 2つ揃い！ +' + winAmount + ' クレジット';
+    } else {
+        message = '残念...もう一度！';
+    }
+    
+    credits += winAmount;
+    updateDisplay();
+    
+    const msgEl = document.getElementById('message');
+    msgEl.textContent = message;
+    msgEl.className = winAmount > 0 ? 'win' : '';
+    
+    spinning = false;
+    document.getElementById('spin-btn').disabled = false;
+    
+    if (credits < BET_AMOUNT) {
+        setTimeout(() => {
+            if (confirm('クレジットがなくなりました！リセットしますか？')) {
+                credits = 1000;
+                updateDisplay();
+                document.getElementById('message').textContent = '';
+            }
+        }, 2000);
+    }
+}
+
+updateDisplay();
+</script>
+</body>
+</html>

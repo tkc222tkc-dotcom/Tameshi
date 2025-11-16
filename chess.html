@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>チェス - AI対戦（普通）</title>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background: #222;
+        color: white;
+        text-align: center;
+        padding: 20px;
+    }
+    h1 { margin-top: 10px; }
+    a { color: #ccc; text-decoration: none; }
+    #board {
+        display: grid;
+        grid-template-columns: repeat(8, 60px);
+        grid-template-rows: repeat(8, 60px);
+        gap: 0;
+        margin: 20px auto;
+        width: max-content;
+        border: 2px solid #8B4513;
+    }
+    .square {
+        width: 60px;
+        height: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 36px;
+        cursor: pointer;
+        user-select: none;
+    }
+    .white-piece { color: #f0f0f0; text-shadow: 1px 1px 2px #000; }
+    .black-piece { color: #1a1a1a; text-shadow: 1px 1px 2px #fff; }
+    .light { background: #f0d9b5; }
+    .dark { background: #b58863; }
+    .selected { background: #7fa650 !important; }
+    .legal-move { box-shadow: inset 0 0 0 3px rgba(255, 255, 0, 0.5); }
+    #info {
+        margin: 15px 0;
+        font-size: 18px;
+    }
+    button {
+        margin-top: 10px;
+        padding: 10px 20px;
+        font-size: 16px;
+        cursor: pointer;
+    }
+</style>
+</head>
+<body>
+<h1>チェス - AI対戦（難易度：普通）</h1>
+<a href="index.html">← 戻る</a>
+<div id="info">あなた（白）の番です</div>
+<div id="board"></div>
+<button onclick="restart()">リスタート</button>
+
+<script>
+const EMPTY = '';
+const WHITE = 'w';
+const BLACK = 'b';
+
+const pieces = {
+    'wK': '♔', 'wQ': '♕', 'wR': '♖', 'wB': '♗', 'wN': '♘', 'wP': '♙',
+    'bK': '♚', 'bQ': '♛', 'bR': '♜', 'bB': '♝', 'bN': '♞', 'bP': '♟'
+};
+
+const pieceValues = {
+    'P': 1, 'N': 3, 'B': 3, 'R': 5, 'Q': 9, 'K': 100
+};
+
+let board = [];
+let turn = WHITE;
+let selected = null;
+let legalMoves = [];
+
+function initBoard() {
+    board = [
+        ['bR','bN','bB','bQ','bK','bB','bN','bR'],
+        ['bP','bP','bP','bP','bP','bP','bP','bP'],
+        [EMPTY,EMPTY,EMPTY,EMPTY,EMPTY,EMPTY,EMPTY,EMPTY],
+        [EMPTY,EMPTY,EMPTY,EMPTY,EMPTY,EMPTY,EMPTY,EMPTY],
+        [EMPTY,EMPTY,EMPTY,EMPTY,EMPTY,EMPTY,EMPTY,EMPTY],
+        [EMPTY,EMPTY,EMPTY,EMPTY,EMPTY,EMPTY,EMPTY,EMPTY],
+        ['wP','wP','wP','wP','wP','wP','wP','wP'],
+        ['wR','wN','wB','wQ','wK','wB','wN','wR']
+    ];
+    turn = WHITE;
+    selected = null;
+    legalMoves = [];
+    render();
+}
+
+function render() {
+    const boardEl = document.getElementById('board');
+    boardEl.innerHTML = '';
+    
+    for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+            const square = document.createElement('div');
+            square.className = 'square ' + ((x + y) % 2 === 0 ? 'light' : 'dark');
+            square.dataset.x = x;
+            square.dataset.y = y;
+            
+            const piece = board[y][x];
+            if (piece !== EMPTY) {
+                const span = document.createElement('span');
+                span.textContent = pieces[piece];
+                span.className = piece[0] === 'w' ? 'white-piece' : 'black-piece';
+                square.appendChild(span);
+            }
+            
+            if (selected && selected.x === x && selected.y === y) {
+                square.classList.add('selected');
+            }
+            
+            if (legalMoves.some(m => m.x === x && m.y === y)) {
+                square.classList.add('legal-move');
+            }
+            
+            square.onclick = () => handleClick(x, y);
+            boardEl.appendChild(square);
+        }
+    }
+    
+    document.getElementById('info').textContent = 
+        turn === WHITE ? 'あなた（白）の番です' : 'AI（黒）思考中...';
+}
+
+function handleClick(x, y) {
+    if (turn !== WHITE) return;
+    
+    const piece = board[y][x];
+    
+    if (selected) {
+        const move = legalMoves.find(m => m.x === x && m.y === y);
+        if (move) {
+            makeMove(selected.x, selected.y, x, y);
+            selected = null;
+            legalMoves = [];
+            turn = BLACK;
+            render();
+            setTimeout(aiMove, 500);
+        } else if (piece && piece[0] === WHITE) {
+            selected = {x, y};
+            legalMoves = getLegalMoves(x, y);
+            render();
+        } else {
+            selected = null;
+            legalMoves = [];
+            render();
+        }
+    } else {
+        if (piece && piece[0] === WHITE) {
+            selected = {x, y};
+            legalMoves = getLegalMoves(x, y);
+            render();
+        }
+    }
+}
+
+function makeMove(sx, sy, tx, ty) {
+    board[ty][tx] = board[sy][sx];
+    board[sy][sx] = EMPTY;
+}
+
+function getLegalMoves(x, y) {
+    const piece = board[y][x];
+    if (!piece) return [];
+    
+    const color = piece[0];
+    const type = piece[1];
+    let moves = [];
+    
+    const addMove = (nx, ny) => {
+        if (nx < 0 || nx > 7 || ny < 0 || ny > 7) return false;
+        const target = board[ny][nx];
+        if (target === EMPTY || target[0] !== color) {
+            moves.push({x: nx, y: ny});
+            return target === EMPTY;
+        }
+        return false;
+    };
+    
+    if (type === 'P') {
+        const dir = color === WHITE ? -1 : 1;
+        if (board[y + dir] && board[y + dir][x] === EMPTY) {
+            addMove(x, y + dir);
+            if ((color === WHITE && y === 6) || (color === BLACK && y === 1)) {
+                if (board[y + 2*dir][x] === EMPTY) addMove(x, y + 2*dir);
+            }
+        }
+        if (board[y + dir] && board[y + dir][x - 1] && board[y + dir][x - 1][0] !== color && board[y + dir][x - 1] !== EMPTY) {
+            addMove(x - 1, y + dir);
+        }
+        if (board[y + dir] && board[y + dir][x + 1] && board[y + dir][x + 1][0] !== color && board[y + dir][x + 1] !== EMPTY) {
+            addMove(x + 1, y + dir);
+        }
+    } else if (type === 'N') {
+        [[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[1,-2],[-1,2],[-1,-2]].forEach(([dx,dy]) => addMove(x+dx, y+dy));
+    } else if (type === 'B') {
+        [[1,1],[1,-1],[-1,1],[-1,-1]].forEach(([dx,dy]) => {
+            for (let i = 1; i < 8; i++) {
+                if (!addMove(x + i*dx, y + i*dy)) break;
+            }
+        });
+    } else if (type === 'R') {
+        [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dy]) => {
+            for (let i = 1; i < 8; i++) {
+                if (!addMove(x + i*dx, y + i*dy)) break;
+            }
+        });
+    } else if (type === 'Q') {
+        [[1,1],[1,-1],[-1,1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dy]) => {
+            for (let i = 1; i < 8; i++) {
+                if (!addMove(x + i*dx, y + i*dy)) break;
+            }
+        });
+    } else if (type === 'K') {
+        [[1,1],[1,-1],[-1,1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dy]) => addMove(x+dx, y+dy));
+    }
+    
+    return moves;
+}
+
+function aiMove() {
+    let bestMove = null;
+    let bestScore = -Infinity;
+    
+    for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+            const piece = board[y][x];
+            if (piece && piece[0] === BLACK) {
+                const moves = getLegalMoves(x, y);
+                for (const move of moves) {
+                    const captured = board[move.y][move.x];
+                    board[move.y][move.x] = board[y][x];
+                    board[y][x] = EMPTY;
+                    
+                    let score = evaluateBoard();
+                    if (captured !== EMPTY) {
+                        score += pieceValues[captured[1]] || 0;
+                    }
+                    
+                    board[y][x] = board[move.y][move.x];
+                    board[move.y][move.x] = captured;
+                    
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestMove = {sx: x, sy: y, tx: move.x, ty: move.y};
+                    }
+                }
+            }
+        }
+    }
+    
+    if (bestMove) {
+        makeMove(bestMove.sx, bestMove.sy, bestMove.tx, bestMove.ty);
+    }
+    
+    turn = WHITE;
+    render();
+}
+
+function evaluateBoard() {
+    let score = 0;
+    for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+            const piece = board[y][x];
+            if (piece !== EMPTY) {
+                const value = pieceValues[piece[1]] || 0;
+                score += piece[0] === BLACK ? value : -value;
+            }
+        }
+    }
+    return score;
+}
+
+function restart() {
+    initBoard();
+}
+
+initBoard();
+</script>
+</body>
+</html>

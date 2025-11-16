@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>テトリス</title>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background: #222;
+        color: white;
+        text-align: center;
+        padding: 20px;
+    }
+    h1 { margin-top: 10px; }
+    a { color: #ccc; text-decoration: none; }
+    #game-container {
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        gap: 30px;
+        margin-top: 20px;
+    }
+    #board {
+        display: grid;
+        grid-template-columns: repeat(10, 30px);
+        gap: 1px;
+        background: #111;
+        padding: 2px;
+        border: 3px solid #666;
+    }
+    .cell {
+        width: 30px;
+        height: 30px;
+        background: #222;
+    }
+    .filled { background: #00f; }
+    .filled-1 { background: #0ff; }
+    .filled-2 { background: #00f; }
+    .filled-3 { background: #f80; }
+    .filled-4 { background: #ff0; }
+    .filled-5 { background: #0f0; }
+    .filled-6 { background: #a0f; }
+    .filled-7 { background: #f00; }
+    #info {
+        text-align: left;
+        background: #333;
+        padding: 20px;
+        border-radius: 8px;
+        min-width: 200px;
+    }
+    #info h2 { margin-top: 0; }
+    button {
+        margin-top: 15px;
+        padding: 10px 20px;
+        font-size: 16px;
+        cursor: pointer;
+        background: #2a7;
+        color: white;
+        border: none;
+        border-radius: 5px;
+    }
+    button:hover { background: #3b8; }
+    .controls {
+        margin-top: 20px;
+        color: #aaa;
+        font-size: 14px;
+    }
+</style>
+</head>
+<body>
+<h1>テトリス</h1>
+<a href="index.html">← 戻る</a>
+
+<div id="game-container">
+    <div id="board"></div>
+    <div id="info">
+        <h2>スコア</h2>
+        <div id="score">0</div>
+        <h2>レベル</h2>
+        <div id="level">1</div>
+        <h2>ライン</h2>
+        <div id="lines">0</div>
+        <button onclick="togglePause()">一時停止</button>
+        <button onclick="restart()">リスタート</button>
+        <div class="controls">
+            <h3>操作方法</h3>
+            ← → : 移動<br>
+            ↓ : 高速落下<br>
+            ↑ : 回転<br>
+            スペース : 即座に落下
+        </div>
+    </div>
+</div>
+
+<script>
+const ROWS = 20;
+const COLS = 10;
+const SHAPES = [
+    [[1,1,1,1]], // I
+    [[1,1],[1,1]], // O
+    [[0,1,0],[1,1,1]], // T
+    [[1,0,0],[1,1,1]], // L
+    [[0,0,1],[1,1,1]], // J
+    [[0,1,1],[1,1,0]], // S
+    [[1,1,0],[0,1,1]]  // Z
+];
+
+let board = [];
+let currentPiece = null;
+let currentX = 0;
+let currentY = 0;
+let score = 0;
+let lines = 0;
+let level = 1;
+let gameInterval = null;
+let isPaused = false;
+let gameOver = false;
+
+const boardEl = document.getElementById('board');
+const scoreEl = document.getElementById('score');
+const levelEl = document.getElementById('level');
+const linesEl = document.getElementById('lines');
+
+function init() {
+    board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+    score = 0;
+    lines = 0;
+    level = 1;
+    gameOver = false;
+    isPaused = false;
+    
+    boardEl.innerHTML = '';
+    
+    for (let i = 0; i < ROWS * COLS; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        boardEl.appendChild(cell);
+    }
+    
+    spawnPiece();
+    updateDisplay();
+    startGame();
+}
+
+function startGame() {
+    if (gameInterval) clearInterval(gameInterval);
+    gameInterval = setInterval(gameLoop, Math.max(100, 600 - level * 50));
+}
+
+function gameLoop() {
+    if (isPaused || gameOver) return;
+    
+    if (!moveDown()) {
+        lockPiece();
+        clearLines();
+        spawnPiece();
+        
+        if (checkCollision(currentPiece, currentX, currentY)) {
+            gameOver = true;
+            clearInterval(gameInterval);
+            alert('ゲームオーバー！スコア: ' + score);
+        }
+    }
+    render();
+}
+
+function spawnPiece() {
+    const shapeIndex = Math.floor(Math.random() * SHAPES.length);
+    currentPiece = SHAPES[shapeIndex].map(row => [...row]);
+    currentX = Math.floor(COLS / 2) - Math.floor(currentPiece[0].length / 2);
+    currentY = 0;
+}
+
+function checkCollision(piece, x, y) {
+    for (let row = 0; row < piece.length; row++) {
+        for (let col = 0; col < piece[row].length; col++) {
+            if (piece[row][col]) {
+                const newX = x + col;
+                const newY = y + row;
+                
+                if (newX < 0 || newX >= COLS || newY >= ROWS) return true;
+                if (newY >= 0 && board[newY][newX]) return true;
+            }
+        }
+    }
+    return false;
+}
+
+function moveDown() {
+    if (checkCollision(currentPiece, currentX, currentY + 1)) return false;
+    currentY++;
+    return true;
+}
+
+function moveLeft() {
+    if (!checkCollision(currentPiece, currentX - 1, currentY)) {
+        currentX--;
+        render();
+    }
+}
+
+function moveRight() {
+    if (!checkCollision(currentPiece, currentX + 1, currentY)) {
+        currentX++;
+        render();
+    }
+}
+
+function rotate() {
+    const rotated = currentPiece[0].map((_, i) => 
+        currentPiece.map(row => row[i]).reverse()
+    );
+    
+    if (!checkCollision(rotated, currentX, currentY)) {
+        currentPiece = rotated;
+        render();
+    }
+}
+
+function hardDrop() {
+    while (moveDown()) {}
+    lockPiece();
+    clearLines();
+    spawnPiece();
+    if (checkCollision(currentPiece, currentX, currentY)) {
+        gameOver = true;
+        clearInterval(gameInterval);
+        alert('ゲームオーバー！スコア: ' + score);
+    }
+    render();
+}
+
+function lockPiece() {
+    for (let row = 0; row < currentPiece.length; row++) {
+        for (let col = 0; col < currentPiece[row].length; col++) {
+            if (currentPiece[row][col]) {
+                const y = currentY + row;
+                const x = currentX + col;
+                if (y >= 0 && y < ROWS && x >= 0 && x < COLS) {
+                    board[y][x] = 1;
+                }
+            }
+        }
+    }
+}
+
+function clearLines() {
+    let linesCleared = 0;
+    
+    for (let row = ROWS - 1; row >= 0; row--) {
+        if (board[row].every(cell => cell !== 0)) {
+            board.splice(row, 1);
+            board.unshift(Array(COLS).fill(0));
+            linesCleared++;
+            row++;
+        }
+    }
+    
+    if (linesCleared > 0) {
+        lines += linesCleared;
+        score += linesCleared * linesCleared * 100 * level;
+        level = Math.floor(lines / 10) + 1;
+        
+        clearInterval(gameInterval);
+        startGame();
+        updateDisplay();
+    }
+}
+
+function render() {
+    const cells = boardEl.children;
+    
+    for (let row = 0; row < ROWS; row++) {
+        for (let col = 0; col < COLS; col++) {
+            const index = row * COLS + col;
+            cells[index].className = 'cell';
+            
+            if (board[row][col]) {
+                cells[index].className = 'cell filled';
+            }
+        }
+    }
+    
+    if (currentPiece) {
+        for (let row = 0; row < currentPiece.length; row++) {
+            for (let col = 0; col < currentPiece[row].length; col++) {
+                if (currentPiece[row][col]) {
+                    const y = currentY + row;
+                    const x = currentX + col;
+                    if (y >= 0 && y < ROWS && x >= 0 && x < COLS) {
+                        const index = y * COLS + x;
+                        cells[index].className = 'cell filled';
+                    }
+                }
+            }
+        }
+    }
+}
+
+function updateDisplay() {
+    scoreEl.textContent = score;
+    levelEl.textContent = level;
+    linesEl.textContent = lines;
+}
+
+function togglePause() {
+    isPaused = !isPaused;
+    event.target.textContent = isPaused ? '再開' : '一時停止';
+}
+
+function restart() {
+    if (gameInterval) clearInterval(gameInterval);
+    boardEl.innerHTML = '';
+    init();
+}
+
+document.addEventListener('keydown', (e) => {
+    if (gameOver || isPaused) return;
+    
+    if (e.key === 'ArrowLeft') moveLeft();
+    else if (e.key === 'ArrowRight') moveRight();
+    else if (e.key === 'ArrowDown') moveDown() && render();
+    else if (e.key === 'ArrowUp') rotate();
+    else if (e.key === ' ') {
+        e.preventDefault();
+        hardDrop();
+    }
+});
+
+init();
+</script>
+</body>
+</html>

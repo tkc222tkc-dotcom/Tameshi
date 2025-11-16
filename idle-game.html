@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>放置ゲーム - クッキー工場</title>
+<style>
+    body {
+        margin: 0;
+        padding: 20px;
+        background: #222;
+        color: white;
+        font-family: Arial, sans-serif;
+        text-align: center;
+    }
+    h1 { margin: 10px 0; }
+    a { color: #ccc; text-decoration: none; }
+    #game-container {
+        max-width: 900px;
+        margin: 20px auto;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+    }
+    #clicker {
+        background: #333;
+        padding: 30px;
+        border-radius: 15px;
+        border: 3px solid #666;
+    }
+    #cookie {
+        width: 200px;
+        height: 200px;
+        font-size: 150px;
+        cursor: pointer;
+        user-select: none;
+        transition: transform 0.1s;
+        margin: 20px auto;
+        display: block;
+    }
+    #cookie:active {
+        transform: scale(0.95);
+    }
+    #stats {
+        background: #2a2a2a;
+        padding: 20px;
+        border-radius: 10px;
+        margin-top: 20px;
+    }
+    .stat-row {
+        display: flex;
+        justify-content: space-between;
+        margin: 10px 0;
+        font-size: 18px;
+    }
+    .stat-label { color: #aaa; }
+    .stat-value { color: #2f4; font-weight: bold; }
+    #upgrades {
+        background: #333;
+        padding: 20px;
+        border-radius: 15px;
+        border: 3px solid #666;
+    }
+    .upgrade {
+        background: #444;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 8px;
+        border: 2px solid #555;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .upgrade:hover:not(.disabled) {
+        background: #555;
+        border-color: #2a7;
+        transform: translateX(5px);
+    }
+    .upgrade.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+    .upgrade-name {
+        font-size: 18px;
+        font-weight: bold;
+        color: #2a7;
+        margin-bottom: 5px;
+    }
+    .upgrade-desc {
+        font-size: 14px;
+        color: #aaa;
+        margin: 5px 0;
+    }
+    .upgrade-cost {
+        font-size: 16px;
+        color: #fa0;
+        margin-top: 5px;
+    }
+    .upgrade-owned {
+        font-size: 14px;
+        color: #2f4;
+    }
+    #total-cookies {
+        font-size: 48px;
+        font-weight: bold;
+        color: #fa0;
+        margin: 20px 0;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+    }
+    button {
+        padding: 10px 20px;
+        font-size: 16px;
+        cursor: pointer;
+        background: #c44;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        margin: 10px 5px;
+    }
+    button:hover { background: #d55; }
+</style>
+</head>
+<body>
+<h1>🍪 放置ゲーム - クッキー工場</h1>
+<a href="index.html">← 戻る</a>
+
+<div id="game-container">
+    <div id="clicker">
+        <div id="total-cookies">0</div>
+        <div style="color:#aaa; margin-bottom:10px;">クッキー</div>
+        
+        <div id="cookie" onclick="clickCookie()">🍪</div>
+        
+        <div id="stats">
+            <div class="stat-row">
+                <span class="stat-label">クリック毎:</span>
+                <span class="stat-value" id="perClick">1</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">毎秒:</span>
+                <span class="stat-value" id="perSecond">0</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">合計生産:</span>
+                <span class="stat-value" id="totalProduced">0</span>
+            </div>
+        </div>
+        
+        <button onclick="save()">セーブ</button>
+        <button onclick="resetGame()">リセット</button>
+    </div>
+    
+    <div id="upgrades">
+        <h2 style="margin-top:0;">アップグレード</h2>
+        <div id="upgradesList"></div>
+    </div>
+</div>
+
+<script>
+let cookies = 0;
+let totalProduced = 0;
+let clickPower = 1;
+let cps = 0;
+
+const upgrades = [
+    {
+        id: 'cursor',
+        name: 'カーソル',
+        desc: '自動的にクリック',
+        baseCost: 15,
+        cps: 0.1,
+        owned: 0
+    },
+    {
+        id: 'grandma',
+        name: 'おばあちゃん',
+        desc: 'クッキーを焼いてくれる',
+        baseCost: 100,
+        cps: 1,
+        owned: 0
+    },
+    {
+        id: 'farm',
+        name: '農場',
+        desc: 'クッキーの材料を栽培',
+        baseCost: 500,
+        cps: 8,
+        owned: 0
+    },
+    {
+        id: 'factory',
+        name: '工場',
+        desc: '大量生産体制',
+        baseCost: 3000,
+        cps: 47,
+        owned: 0
+    },
+    {
+        id: 'bank',
+        name: '銀行',
+        desc: 'クッキーで投資',
+        baseCost: 10000,
+        cps: 260,
+        owned: 0
+    },
+    {
+        id: 'temple',
+        name: '神殿',
+        desc: '神の加護',
+        baseCost: 40000,
+        cps: 1400,
+        owned: 0
+    },
+    {
+        id: 'portal',
+        name: 'ポータル',
+        desc: '異次元からクッキー',
+        baseCost: 1000000,
+        cps: 7800,
+        owned: 0
+    }
+];
+
+function clickCookie() {
+    cookies += clickPower;
+    totalProduced += clickPower;
+    updateDisplay();
+}
+
+function buyUpgrade(id) {
+    const upgrade = upgrades.find(u => u.id === id);
+    if (!upgrade) return;
+    
+    const cost = getCost(upgrade);
+    if (cookies >= cost) {
+        cookies -= cost;
+        upgrade.owned++;
+        updateCPS();
+        updateDisplay();
+    }
+}
+
+function getCost(upgrade) {
+    return Math.floor(upgrade.baseCost * Math.pow(1.15, upgrade.owned));
+}
+
+function updateCPS() {
+    cps = 0;
+    upgrades.forEach(upgrade => {
+        cps += upgrade.cps * upgrade.owned;
+    });
+}
+
+function updateDisplay() {
+    document.getElementById('total-cookies').textContent = Math.floor(cookies);
+    document.getElementById('perClick').textContent = clickPower;
+    document.getElementById('perSecond').textContent = cps.toFixed(1);
+    document.getElementById('totalProduced').textContent = Math.floor(totalProduced);
+    
+    const upgradesList = document.getElementById('upgradesList');
+    upgradesList.innerHTML = '';
+    
+    upgrades.forEach(upgrade => {
+        const cost = getCost(upgrade);
+        const div = document.createElement('div');
+        div.className = 'upgrade' + (cookies >= cost ? '' : ' disabled');
+        div.onclick = () => buyUpgrade(upgrade.id);
+        
+        div.innerHTML = `
+            <div class="upgrade-name">${upgrade.name}</div>
+            <div class="upgrade-desc">${upgrade.desc}</div>
+            <div class="upgrade-desc">毎秒 +${upgrade.cps}</div>
+            <div class="upgrade-cost">コスト: ${cost} クッキー</div>
+            <div class="upgrade-owned">所有: ${upgrade.owned}</div>
+        `;
+        
+        upgradesList.appendChild(div);
+    });
+}
+
+function gameLoop() {
+    cookies += cps / 10;
+    totalProduced += cps / 10;
+    updateDisplay();
+}
+
+function save() {
+    const saveData = {
+        cookies,
+        totalProduced,
+        clickPower,
+        upgrades: upgrades.map(u => ({ id: u.id, owned: u.owned })),
+        timestamp: Date.now()
+    };
+    localStorage.setItem('idleGameSave', JSON.stringify(saveData));
+    alert('セーブしました！');
+}
+
+function load() {
+    const saveData = localStorage.getItem('idleGameSave');
+    if (saveData) {
+        const data = JSON.parse(saveData);
+        cookies = data.cookies || 0;
+        totalProduced = data.totalProduced || 0;
+        clickPower = data.clickPower || 1;
+        
+        if (data.upgrades) {
+            data.upgrades.forEach(saved => {
+                const upgrade = upgrades.find(u => u.id === saved.id);
+                if (upgrade) upgrade.owned = saved.owned;
+            });
+        }
+        
+        if (data.timestamp) {
+            const offlineTime = (Date.now() - data.timestamp) / 1000;
+            if (offlineTime > 0 && offlineTime < 86400) {
+                const offlineGain = Math.floor(cps * offlineTime);
+                if (offlineGain > 0) {
+                    cookies += offlineGain;
+                    totalProduced += offlineGain;
+                    alert(`オフライン中に ${offlineGain} クッキーを生産しました！`);
+                }
+            }
+        }
+        
+        updateCPS();
+        updateDisplay();
+    }
+}
+
+function resetGame() {
+    if (confirm('本当にリセットしますか？全てのデータが削除されます。')) {
+        localStorage.removeItem('idleGameSave');
+        cookies = 0;
+        totalProduced = 0;
+        clickPower = 1;
+        cps = 0;
+        upgrades.forEach(u => u.owned = 0);
+        updateDisplay();
+    }
+}
+
+window.addEventListener('beforeunload', () => {
+    save();
+});
+
+load();
+updateDisplay();
+setInterval(gameLoop, 100);
+</script>
+</body>
+</html>

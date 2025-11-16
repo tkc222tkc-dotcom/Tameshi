@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>ミニRPG</title>
+<style>
+    body {
+        margin: 0;
+        padding: 20px;
+        background: #222;
+        color: white;
+        font-family: Arial, sans-serif;
+        text-align: center;
+    }
+    h1 { margin: 10px 0; }
+    a { color: #ccc; text-decoration: none; }
+    #game-container {
+        display: inline-block;
+        margin: 20px auto;
+    }
+    canvas {
+        border: 3px solid #666;
+        background: #1a1a1a;
+        display: block;
+        margin: 0 auto;
+    }
+    #ui {
+        margin-top: 20px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        max-width: 800px;
+        margin: 20px auto;
+    }
+    .panel {
+        background: #333;
+        padding: 20px;
+        border-radius: 10px;
+        border: 2px solid #666;
+        text-align: left;
+    }
+    .panel h3 {
+        margin: 0 0 15px;
+        color: #2a7;
+        border-bottom: 2px solid #444;
+        padding-bottom: 10px;
+    }
+    .stat-row {
+        display: flex;
+        justify-content: space-between;
+        margin: 8px 0;
+        font-size: 16px;
+    }
+    .stat-label { color: #aaa; }
+    .stat-value { color: #2f4; font-weight: bold; }
+    .hp-bar {
+        background: #444;
+        height: 20px;
+        border-radius: 10px;
+        overflow: hidden;
+        margin: 10px 0;
+    }
+    .hp-fill {
+        background: linear-gradient(90deg, #f44 0%, #fa0 100%);
+        height: 100%;
+        transition: width 0.3s;
+    }
+    .item {
+        background: #444;
+        padding: 10px;
+        margin: 5px 0;
+        border-radius: 5px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    button {
+        padding: 8px 15px;
+        font-size: 14px;
+        cursor: pointer;
+        background: #2a7;
+        color: white;
+        border: none;
+        border-radius: 5px;
+    }
+    button:hover { background: #3b8; }
+    button:disabled {
+        background: #666;
+        cursor: not-allowed;
+    }
+    #battle {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0,0,0,0.95);
+        padding: 40px;
+        border-radius: 15px;
+        border: 3px solid #f44;
+        display: none;
+        min-width: 400px;
+    }
+    #battle h2 { color: #f44; margin-top: 0; }
+    .battle-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        margin-top: 20px;
+    }
+    .controls {
+        margin-top: 15px;
+        font-size: 14px;
+        color: #aaa;
+    }
+</style>
+</head>
+<body>
+<h1>⚔️ ミニRPG</h1>
+<a href="index.html">← 戻る</a>
+
+<div id="game-container">
+    <canvas id="gameCanvas" width="640" height="480"></canvas>
+</div>
+
+<div class="controls">
+    WASD or 矢印キーで移動 | 敵に触れると戦闘開始
+</div>
+
+<div id="ui">
+    <div class="panel">
+        <h3>プレイヤー情報</h3>
+        <div class="stat-row">
+            <span class="stat-label">レベル:</span>
+            <span class="stat-value" id="level">1</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">HP:</span>
+            <span class="stat-value"><span id="hp">100</span> / <span id="maxHp">100</span></span>
+        </div>
+        <div class="hp-bar">
+            <div class="hp-fill" id="hpBar" style="width: 100%"></div>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">攻撃力:</span>
+            <span class="stat-value" id="attack">10</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">経験値:</span>
+            <span class="stat-value"><span id="exp">0</span> / <span id="expNext">100</span></span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">ゴールド:</span>
+            <span class="stat-value" id="gold">50</span>
+        </div>
+    </div>
+    
+    <div class="panel">
+        <h3>インベントリ</h3>
+        <div id="inventory"></div>
+    </div>
+</div>
+
+<div id="battle">
+    <h2>戦闘！</h2>
+    <div class="stat-row">
+        <span>敵: <span id="enemyName"></span></span>
+    </div>
+    <div class="stat-row">
+        <span>HP: <span id="enemyHp">0</span> / <span id="enemyMaxHp">0</span></span>
+    </div>
+    <div class="hp-bar">
+        <div class="hp-fill" id="enemyHpBar" style="width: 100%"></div>
+    </div>
+    <div id="battleLog" style="margin: 20px 0; min-height: 60px; color: #aaa;"></div>
+    <div class="battle-actions">
+        <button onclick="battleAction('attack')">攻撃</button>
+        <button onclick="battleAction('heal')" id="healBtn">回復 (ポーション)</button>
+        <button onclick="battleAction('run')">逃げる</button>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const TILE_SIZE = 32;
+const MAP_WIDTH = 20;
+const MAP_HEIGHT = 15;
+
+let player = {
+    x: 5,
+    y: 7,
+    hp: 100,
+    maxHp: 100,
+    level: 1,
+    exp: 0,
+    expNext: 100,
+    attack: 10,
+    gold: 50
+};
+
+let inventory = [
+    { name: 'ポーション', count: 3, effect: 'heal', value: 30 }
+];
+
+let enemies = [
+    { x: 15, y: 5, name: 'スライム', hp: 30, maxHp: 30, attack: 5, exp: 25, gold: 10 },
+    { x: 10, y: 3, name: 'ゴブリン', hp: 50, maxHp: 50, attack: 8, exp: 40, gold: 20 },
+    { x: 17, y: 10, name: 'オーク', hp: 80, maxHp: 80, attack: 12, exp: 60, gold: 35 }
+];
+
+let currentEnemy = null;
+let inBattle = false;
+
+const map = Array(MAP_HEIGHT).fill().map(() => Array(MAP_WIDTH).fill(1));
+for (let y = 1; y < MAP_HEIGHT - 1; y++) {
+    for (let x = 1; x < MAP_WIDTH - 1; x++) {
+        map[y][x] = Math.random() < 0.15 ? 2 : 0;
+    }
+}
+
+function render() {
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    for (let y = 0; y < MAP_HEIGHT; y++) {
+        for (let x = 0; x < MAP_WIDTH; x++) {
+            const tile = map[y][x];
+            if (tile === 1) {
+                ctx.fillStyle = '#666';
+            } else if (tile === 2) {
+                ctx.fillStyle = '#2a5';
+            } else {
+                ctx.fillStyle = '#333';
+            }
+            ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            
+            ctx.strokeStyle = '#222';
+            ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+        }
+    }
+    
+    enemies.forEach(enemy => {
+        ctx.fillStyle = '#f44';
+        ctx.fillRect(enemy.x * TILE_SIZE + 4, enemy.y * TILE_SIZE + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+        ctx.fillStyle = '#fff';
+        ctx.font = '20px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('👹', enemy.x * TILE_SIZE + TILE_SIZE / 2, enemy.y * TILE_SIZE + 22);
+    });
+    
+    ctx.fillStyle = '#44f';
+    ctx.fillRect(player.x * TILE_SIZE + 4, player.y * TILE_SIZE + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+    ctx.fillStyle = '#fff';
+    ctx.font = '20px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('🧙', player.x * TILE_SIZE + TILE_SIZE / 2, player.y * TILE_SIZE + 22);
+}
+
+function movePlayer(dx, dy) {
+    if (inBattle) return;
+    
+    const newX = player.x + dx;
+    const newY = player.y + dy;
+    
+    if (newX >= 0 && newX < MAP_WIDTH && newY >= 0 && newY < MAP_HEIGHT) {
+        if (map[newY][newX] !== 1) {
+            player.x = newX;
+            player.y = newY;
+            
+            const enemy = enemies.find(e => e.x === player.x && e.y === player.y);
+            if (enemy) {
+                startBattle(enemy);
+            }
+            
+            render();
+        }
+    }
+}
+
+function startBattle(enemy) {
+    currentEnemy = { ...enemy };
+    inBattle = true;
+    
+    document.getElementById('battle').style.display = 'block';
+    document.getElementById('enemyName').textContent = currentEnemy.name;
+    document.getElementById('enemyHp').textContent = currentEnemy.hp;
+    document.getElementById('enemyMaxHp').textContent = currentEnemy.maxHp;
+    document.getElementById('enemyHpBar').style.width = '100%';
+    document.getElementById('battleLog').textContent = `${currentEnemy.name} が現れた！`;
+    
+    updateHealButton();
+}
+
+function battleAction(action) {
+    if (!inBattle) return;
+    
+    const log = document.getElementById('battleLog');
+    
+    if (action === 'attack') {
+        const damage = player.attack + Math.floor(Math.random() * 5);
+        currentEnemy.hp -= damage;
+        log.textContent = `${damage} のダメージを与えた！`;
+        
+        updateEnemyHP();
+        
+        if (currentEnemy.hp <= 0) {
+            setTimeout(() => {
+                log.textContent = `${currentEnemy.name} を倒した！`;
+                player.exp += currentEnemy.exp;
+                player.gold += currentEnemy.gold;
+                
+                const index = enemies.findIndex(e => e.x === currentEnemy.x && e.y === currentEnemy.y);
+                if (index !== -1) enemies.splice(index, 1);
+                
+                checkLevelUp();
+                updateDisplay();
+                
+                setTimeout(() => {
+                    endBattle();
+                }, 1000);
+            }, 500);
+            return;
+        }
+        
+        setTimeout(enemyTurn, 800);
+        
+    } else if (action === 'heal') {
+        const potion = inventory.find(i => i.name === 'ポーション');
+        if (potion && potion.count > 0) {
+            potion.count--;
+            player.hp = Math.min(player.maxHp, player.hp + potion.value);
+            log.textContent = `ポーションを使った！HPが ${potion.value} 回復！`;
+            updateDisplay();
+            updateInventory();
+            updateHealButton();
+            setTimeout(enemyTurn, 800);
+        }
+        
+    } else if (action === 'run') {
+        if (Math.random() < 0.5) {
+            log.textContent = '逃げ出した！';
+            setTimeout(() => {
+                player.x -= 1;
+                endBattle();
+            }, 800);
+        } else {
+            log.textContent = '逃げられなかった！';
+            setTimeout(enemyTurn, 800);
+        }
+    }
+}
+
+function enemyTurn() {
+    const damage = currentEnemy.attack + Math.floor(Math.random() * 3);
+    player.hp -= damage;
+    
+    const log = document.getElementById('battleLog');
+    log.textContent = `${currentEnemy.name} の攻撃！ ${damage} のダメージを受けた！`;
+    
+    updateDisplay();
+    
+    if (player.hp <= 0) {
+        setTimeout(() => {
+            alert('やられてしまった...HPを回復して再挑戦！');
+            player.hp = player.maxHp;
+            player.x = 5;
+            player.y = 7;
+            updateDisplay();
+            endBattle();
+        }, 1000);
+    }
+}
+
+function endBattle() {
+    inBattle = false;
+    currentEnemy = null;
+    document.getElementById('battle').style.display = 'none';
+    render();
+}
+
+function updateEnemyHP() {
+    const percent = (currentEnemy.hp / currentEnemy.maxHp) * 100;
+    document.getElementById('enemyHp').textContent = Math.max(0, currentEnemy.hp);
+    document.getElementById('enemyHpBar').style.width = Math.max(0, percent) + '%';
+}
+
+function checkLevelUp() {
+    while (player.exp >= player.expNext) {
+        player.level++;
+        player.exp -= player.expNext;
+        player.expNext = Math.floor(player.expNext * 1.5);
+        player.maxHp += 20;
+        player.hp = player.maxHp;
+        player.attack += 3;
+        alert(`レベルアップ！レベル ${player.level} になった！`);
+    }
+}
+
+function updateDisplay() {
+    document.getElementById('level').textContent = player.level;
+    document.getElementById('hp').textContent = Math.max(0, player.hp);
+    document.getElementById('maxHp').textContent = player.maxHp;
+    document.getElementById('attack').textContent = player.attack;
+    document.getElementById('exp').textContent = player.exp;
+    document.getElementById('expNext').textContent = player.expNext;
+    document.getElementById('gold').textContent = player.gold;
+    
+    const hpPercent = (player.hp / player.maxHp) * 100;
+    document.getElementById('hpBar').style.width = hpPercent + '%';
+}
+
+function updateInventory() {
+    const inv = document.getElementById('inventory');
+    inv.innerHTML = '';
+    
+    inventory.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'item';
+        div.innerHTML = `
+            <span>${item.name} x${item.count}</span>
+        `;
+        inv.appendChild(div);
+    });
+}
+
+function updateHealButton() {
+    const potion = inventory.find(i => i.name === 'ポーション');
+    const btn = document.getElementById('healBtn');
+    btn.disabled = !potion || potion.count <= 0;
+}
+
+document.addEventListener('keydown', (e) => {
+    if (inBattle) return;
+    
+    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') movePlayer(0, -1);
+    if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') movePlayer(0, 1);
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') movePlayer(-1, 0);
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') movePlayer(1, 0);
+});
+
+updateDisplay();
+updateInventory();
+render();
+</script>
+</body>
+</html>

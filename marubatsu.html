@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>まるばつゲーム（AI普通）</title>
+  <style>
+    body {
+      text-align: center;
+      background: #222;
+      color: white;
+      font-family: sans-serif;
+    }
+    h1 {
+      margin: 20px;
+    }
+    #message {
+      margin: 10px;
+      font-size: 24px;
+    }
+    .board {
+      display: grid;
+      grid-template-columns: repeat(3, 120px);
+      gap: 6px;
+      margin: 20px auto;
+      width: max-content;
+    }
+    .cell {
+      width: 120px;
+      height: 120px;
+      background: #444;
+      border-radius: 10px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 70px;
+      cursor: pointer;
+      user-select: none;
+      transition: 0.2s;
+    }
+    .cell:hover {
+      background: #666;
+    }
+    button {
+      margin-top: 15px;
+      padding: 10px 20px;
+      font-size: 18px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>まるばつゲーム（AI普通）</h1>
+  <a href="index.html" style="color:#ccc">← 戻る</a>
+
+  <div id="message">あなたの番：○</div>
+
+  <div class="board" id="board"></div>
+
+  <button onclick="resetGame()">リセット</button>
+
+  <script>
+    const HUMAN = "○";
+    const AI = "×";
+    let boardState = Array(9).fill("");
+    let gameOver = false;
+
+    const board = document.getElementById("board");
+    const message = document.getElementById("message");
+
+    for (let i = 0; i < 9; i++) {
+      const c = document.createElement("div");
+      c.className = "cell";
+      c.dataset.index = i;
+      c.onclick = () => playerMove(i);
+      board.appendChild(c);
+    }
+
+    function playerMove(i) {
+      if (gameOver || boardState[i] !== "") return;
+
+      boardState[i] = HUMAN;
+      updateBoard();
+
+      if (checkWin(HUMAN)) {
+        message.textContent = "あなたの勝ち！🎉";
+        gameOver = true;
+        return;
+      }
+
+      if (isDraw()) {
+        message.textContent = "引き分け！";
+        gameOver = true;
+        return;
+      }
+
+      message.textContent = "AIの思考中…";
+      setTimeout(aiMove, 400);
+    }
+
+    function aiMove() {
+      if (gameOver) return;
+
+      let move = null;
+
+      move = findWinningMove(AI);
+      if (move !== null) {
+        boardState[move] = AI;
+        finishAIMove();
+        return;
+      }
+
+      move = findWinningMove(HUMAN);
+      if (move !== null) {
+        boardState[move] = AI;
+        finishAIMove();
+        return;
+      }
+
+      if (boardState[4] === "") {
+        boardState[4] = AI;
+        finishAIMove();
+        return;
+      }
+
+      const empty = boardState
+        .map((v, i) => (v === "" ? i : null))
+        .filter(v => v !== null);
+
+      const randomMove = empty[Math.floor(Math.random() * empty.length)];
+      boardState[randomMove] = AI;
+      finishAIMove();
+    }
+
+    function finishAIMove() {
+      updateBoard();
+
+      if (checkWin(AI)) {
+        message.textContent = "AIの勝ち！😈";
+        gameOver = true;
+        return;
+      }
+
+      if (isDraw()) {
+        message.textContent = "引き分け！";
+        gameOver = true;
+        return;
+      }
+
+      message.textContent = "あなたの番：○";
+    }
+
+    function findWinningMove(player) {
+      for (let i = 0; i < 9; i++) {
+        if (boardState[i] !== "") continue;
+        boardState[i] = player;
+        if (checkWin(player)) {
+          boardState[i] = "";
+          return i;
+        }
+        boardState[i] = "";
+      }
+      return null;
+    }
+
+    function updateBoard() {
+      const cells = document.querySelectorAll(".cell");
+      boardState.forEach((v, i) => {
+        cells[i].textContent = v;
+      });
+    }
+
+    function checkWin(p) {
+      const wins = [
+        [0,1,2],[3,4,5],[6,7,8],
+        [0,3,6],[1,4,7],[2,5,8],
+        [0,4,8],[2,4,6]
+      ];
+      return wins.some(line => line.every(i => boardState[i] === p));
+    }
+
+    function isDraw() {
+      return boardState.every(v => v !== "");
+    }
+
+    function resetGame() {
+      boardState = Array(9).fill("");
+      gameOver = false;
+      updateBoard();
+      message.textContent = "あなたの番：○";
+    }
+  </script>
+</body>
+</html>

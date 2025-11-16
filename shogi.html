@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>将棋 - 成り &amp; 持ち駒 &amp; AI（普通）</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{
+    --bg:#222;
+    --board:#d9b37e;
+    --cell:#c8a060;
+    --cell-alt:#e8c080;
+    --text:white;
+    --accent:#2a7;
+  }
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", Arial, sans-serif;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding:12px;
+  }
+  h1{ margin:10px 0 6px; font-size:20px; }
+  #wrap{ display:flex; gap:18px; align-items:flex-start; }
+  .board {
+    display:grid;
+    grid-template-columns: repeat(9, 48px);
+    grid-template-rows: repeat(9, 48px);
+    gap:2px;
+    padding:8px;
+    background:var(--board);
+    border-radius:8px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+  }
+  .cell {
+    width:48px; height:48px;
+    background:var(--cell);
+    display:flex; align-items:center; justify-content:center;
+    border-radius:4px;
+    position:relative;
+    cursor:pointer;
+    user-select:none;
+    font-size:18px;
+    transform-origin:center;
+  }
+  .cell.alt { background:var(--cell-alt); }
+  .cell.selected { outline:3px solid rgba(255,255,0,0.6); }
+  .cell.legal { box-shadow: inset 0 0 0 3px rgba(0,255,255,0.08); }
+  .piece {
+    transform: rotate(0deg);
+    transition: transform .12s;
+    text-align:center;
+    line-height:1;
+  }
+  .piece.black { transform: rotate(0deg); }
+  .piece.white { transform: rotate(180deg); }
+  .hud {
+    width:260px;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+  .info { background:#333; padding:10px; border-radius:8px; font-size:14px; }
+  .hands { display:flex; gap:8px; flex-wrap:wrap; }
+  .hand { background:#444; padding:6px 8px; border-radius:6px; cursor:pointer; }
+  .btn { padding:8px 10px; border-radius:8px; border:none; cursor:pointer; background:#2b7; color:#052; font-weight:700; }
+  .small { font-size:13px; padding:6px 8px; }
+  .log { background:#111; padding:8px; border-radius:6px; max-height:240px; overflow:auto; font-size:13px; }
+  .footer { margin-top:12px; font-size:13px; color:#ccc; }
+  @media (max-width:760px){
+    .board { transform: scale(0.86); transform-origin:left top; }
+    #wrap { flex-direction:column; align-items:center; }
+  }
+</style>
+</head>
+<body>
+  <h1>将棋（成り＋持ち駒＋AI） — 難易度：普通</h1>
+    <a href="index.html" style="color:#ccc; text-decoration:none; margin-bottom:10px; display:inline-block;">← 戻る</a>
+  <div id="wrap">
+    <div>
+      <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
+        <button class="btn small" onclick="restart()">リセット</button>
+        <button class="small" onclick="toggleAIMode()">{AI:ON}</button>
+        <div style="margin-left:8px; font-size:14px;" id="turnLabel"></div>
+      </div>
+
+      <div class="board" id="board"></div>
+    </div>
+
+    <div class="hud">
+      <div class="info" id="status">読み込み中…</div>
+
+      <div>
+        <div style="font-weight:700; margin-bottom:6px;">先手（あなた）持ち駒：</div>
+        <div class="hands" id="handsBlack"></div>
+      </div>
+
+      <div>
+        <div style="font-weight:700; margin-bottom:6px;">後手（AI）持ち駒：</div>
+        <div class="hands" id="handsWhite"></div>
+      </div>
+
+      <div style="margin-top:6px;">
+        <div style="font-weight:700; margin-bottom:6px;">対局ログ：</div>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">注意：打ち歩詰め等の特殊ルールは一部簡略化しています。必要なら厳密ルール追加可。</div>
+
+<script>
+/* ---------------------------------------
+  将棋ミニエンジン（成り・持ち駒・AI:普通）
+  - 表示は日本語の駒名（王, 玉, 金, 銀, 桂, 香, 歩, 飛, 角）
+  - 成駒は表示を変える。金・王は成らない。
+  - 持ち駒は配列で管理。打ち（drop）可能。
+  - AI: 深さ2（先読み）評価は駒価＋位置重み＋持ち駒影響
+----------------------------------------*/
+
+// 定義
+const PIECE = {
+  // symbol: [name, value, canPromote]
+  'K': {name:'王', val:99999, promote:false}, // 先手玉
+  'k': {name:'玉', val:99999, promote:false}, // 後手玉
+  'G': {name:'金', val:9, promote:false},
+  'S': {name:'銀', val:6, promote:true},
+  'N': {name:'桂', val:5, promote:true},
+  'L': {name:'香', val:4, promote:true},
+  'P': {name:'歩', val:1, promote:true},
+  'R': {name:'飛', val:13, promote:true},
+  'B': {name:'角', val:11, promote:true},
+  // promoted
+  '+S': {name:'成銀', val:9, promote:false},
+  '+N': {name:'成桂', val:9, promote:false},
+  '+L': {name:'成香', val:9, promote:false},
+  '+P': {name:'と', val:9, promote:false},
+  '+R': {name:'龍', val:15, promote:false},
+  '+B': {name:'馬', val:14, promote:false}
+};
+
+// 盤（9x9）
+// 各セルは null または {pc: 'P'|'k'|..., owner: 1(先手) or -1(後手), prom: bool}
+let board; // board[y][x] 0-index, y=0 is 先手陣から見て上(後手の9段目)
+let turn = 1; // 1=先手(プレイヤー)、-1=後手(AI)
+let selected = null; // {x,y}
+let legalMoves = []; // [{x,y, promote:boolean?, drop:false, piece?:...}]
+let hands = {1:{}, '-1':{}}; // 持ち駒 counts, keys: 'P','L','N','S','G','B','R'
+let logEl, statusEl, turnLabelEl, boardEl, handsBlackEl, handsWhiteEl;
+let aiEnabled = true;
+const AI_DEPTH = 2; // 普通（B）
+
+// 初期局面（簡略：先手が下＝playerが下）
+// We'll use standard starting position.
+const initialFen = [
+  ['l','n','s','g','k','g','s','n','l'],
+  ['','r','','','','','','b',''],
+  ['p','p','p','p','p','p','p','p','p'],
+  ['','','','','','','','',''],
+  ['','','','','','','','',''],
+  ['','','','','','','','',''],
+  ['P','P','P','P','P','P','P','P','P'],
+  ['','B','','','','','','R',''],
+  ['L','N','S','G','K','G','S','N','L']
+];
+
+// ヘルパー: deep copy board
+function cloneBoard(b){
+  return b.map(row => row.map(cell => cell ? {...cell} : null));
+}
+
+// 駒表示マップ（表示文字）
+function pieceToLabel(cell){
+  if(!cell) return '';
+  const {pc, owner, prom} = cell;
+  // use pc uppercase for 先手 pieces, lowercase for 後手 initial pcs
+  let key = pc;
+  if(prom){
+    // map to promoted keys
+    if(pc.toUpperCase() === 'P') key = '+P';
+    else if(pc.toUpperCase() === 'L') key = '+L';
+    else if(pc.toUpperCase() === 'N') key = '+N';
+    else if(pc.toUpperCase() === 'S') key = '+S';
+    else if(pc.toUpperCase() === 'R') key = '+R';
+    else if(pc.toUpperCase() === 'B') key = '+B';
+  } else {
+    key = pc.toUpperCase();
+  }
+  const name = PIECE[key] ? PIECE[key].name : pc;
+  return name;
+}
+
+// 初期化
+function init(){
+  boardEl = document.getElementById('board');
+  logEl = document.getElementById('log');
+  statusEl = document.getElementById('status');
+  turnLabelEl = document.getElementById('turnLabel');
+  handsBlackEl = document.getElementById('handsBlack');
+  handsWhiteEl = document.getElementById('handsWhite');
+
+  restart();
+}
+
+// 初期盤面セット
+function resetBoardFromFen(){
+  board = [];
+  for(let y=0;y<9;y++){
+    board[y]=[];
+    for(let x=0;x<9;x++){
+      const s = initialFen[y][x];
+      if(!s || s==='') board[y][x]=null;
+      else{
+        const owner = (s === s.toUpperCase()) ? 1 : -1;
+        const pc = (s.toUpperCase());
+        board[y][x] = { pc: pc, owner: owner, prom: false };
+      }
+    }
+  }
+  // 持ち駒クリア
+  hands = {1:{}, '-1':{}};
+}
+
+// 描画
+function render(){
+  boardEl.innerHTML = '';
+  // alternate shading for board? we'll do alt every other cell
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const cellEl = document.createElement('div');
+      cellEl.className = 'cell' + (((x+y)%2===0)?' alt':'');
+      cellEl.dataset.x = x; cellEl.dataset.y = y;
+      // find piece if exists
+      const c = board[y][x];
+      if(c){
+        const p = document.createElement('div');
+        p.className = 'piece ' + (c.owner===1 ? 'black' : 'white');
+        p.innerText = pieceToLabel(c);
+        cellEl.appendChild(p);
+      }
+      // selection highlight
+      if(selected && selected.x==x && selected.y==y) cellEl.classList.add('selected');
+      // legal move highlight
+      if(legalMoves.some(m => m.x==x && m.y==y && !m.drop)) cellEl.classList.add('legal');
+
+      cellEl.onclick = () => cellClick(x,y);
+      boardEl.appendChild(cellEl);
+    }
+  }
+  // hands
+  renderHands();
+  // status
+  turnLabelEl.innerText = (turn===1 ? '先手（あなた）' : '後手（AI）') + ' の番';
+  statusEl.innerText = '選択：' + (selected ? `(${selected.x+1}, ${selected.y+1})` : 'なし');
+}
+
+// 持ち駒表示（クリックで打ち駒モード）
+function renderHands(){
+  handsBlackEl.innerHTML = '';
+  handsWhiteEl.innerHTML = '';
+  ['P','L','N','S','G','B','R'].forEach(k=>{
+    const countB = hands[1][k] || 0;
+    if(countB>0){
+      const el = document.createElement('div');
+      el.className = 'hand';
+      el.innerText = `${pieceNameByKey(k)} x${countB}`;
+      el.onclick = () => prepareDrop(1,k);
+      handsBlackEl.appendChild(el);
+    }
+    const countW = hands['-1'][k] || 0;
+    if(countW>0){
+      const el2 = document.createElement('div');
+      el2.className = 'hand';
+      el2.innerText = `${pieceNameByKey(k)} x${countW}`;
+      // AI's hand not clickable
+      handsWhiteEl.appendChild(el2);
+    }
+  });
+}
+
+// key -> display name
+function pieceNameByKey(k){
+  return PIECE[k].name;
+}
+
+// クリック処理
+function cellClick(x,y){
+  // If we're in drop mode (selected type is {drop:true, piece:key, owner:turn})
+  if(selected && selected.drop){
+    // attempt drop to x,y for owner == turn
+    const dropInfo = selected;
+    if(dropInfo.owner !== turn){
+      alert('相手の持ち駒は使えません');
+      selected = null; legalMoves=[];
+      render(); return;
+    }
+    // check drop legality (e.g., pawn drop into last rank, nifu)
+    if(!isLegalDrop(turn, dropInfo.piece, x, y)){
+      statusEl.innerText = 'その場所には打てません（ルール違反）';
+      selected = null; legalMoves=[];
+      render(); return;
+    }
+    executeDrop(turn, dropInfo.piece, x, y);
+    selected = null; legalMoves=[];
+    nextTurn();
+    return;
+  }
+
+  const c = board[y][x];
+  if(!c){
+    // empty cell click: if there is a selected piece and target is legal move, move
+    if(selected && !selected.drop){
+      const m = legalMoves.find(m=> m.x==x && m.y==y);
+      if(m){
+        executeMove(selected.x, selected.y, x, y, m.promote);
+        selected = null; legalMoves=[];
+        nextTurn();
+      } else {
+        // nothing
+        selected = null; legalMoves=[];
+      }
+      render();
+      return;
+    }
+    // nothing selected and empty: do nothing
+    selected = null; legalMoves=[];
+    render();
+    return;
+  }
+
+  // cell has piece
+  if(c.owner === turn){
+    // select it, show legal moves
+    selected = {x,y, drop:false};
+    legalMoves = generateLegalMovesForSquare(x,y);
+    render();
+  } else {
+    // opponent piece clicked: if selected and target legal, capture
+    if(selected && !selected.drop){
+      const m = legalMoves.find(m=> m.x==x && m.y==y);
+      if(m){
+        executeMove(selected.x, selected.y, x, y, m.promote);
+        selected = null; legalMoves=[];
+        nextTurn();
+      } else {
+        selected = null; legalMoves=[];
+      }
+      render();
+    } else {
+      // select opponent not allowed
+      selected = null; legalMoves=[];
+      render();
+    }
+  }
+}
+
+/* -------------- ルール：移動生成 -------------- */
+/* movement vectors are expressed from perspective of owner=1 (先手).
+   For owner = -1 we invert dy direction accordingly when computing moves.
+   We'll implement:
+   - King: one step any dir
+   - Gold: step to six directions (no back-diag)
+   - Silver: forward and three diagonals; promoted->gold
+   - Knight: 2 forward +1 left/right (only forward for that owner), promoted->gold
+   - Lance: forward any number, promoted->gold
+   - Pawn: one forward, promoted->gold (to "と")
+   - Rook: orthogonal sliding, promoted->rook+king moves (龍)
+   - Bishop: diagonal sliding, promoted->bishop+king moves (馬)
+*/
+function generateLegalMovesForSquare(x,y){
+  const cell = board[y][x];
+  if(!cell) return [];
+  const owner = cell.owner;
+  const pc = cell.pc; // uppercase letter like 'P'
+  const prom = cell.prom;
+
+  let moves = [];
+
+  function pushMove(nx, ny, promoteAllowed=false){
+    if(nx<0||nx>8||ny<0||ny>8) return;
+    const target = board[ny][nx];
+    if(target && target.owner===owner) return;
+    // push with promote option if allowed & move crosses into promotion zone or originates in it
+    const canProm = promoteAllowed && isPromotionZone(owner, y, ny) && PIECE[pc].promote;
+    if(canProm){
+      // if promotion possible, include both promoted and non-promoted options (if legal)
+      moves.push({x:nx,y:ny, promote:false});
+      // but some moves force promotion (pawn, lance, knight when reaching last ranks)
+      if(forcePromotion(owner, pc, ny)) moves.push({x:nx,y:ny, promote:true});
+      else moves.push({x:nx,y:ny, promote:true});
+    } else {
+      moves.push({x:nx,y:ny, promote:false});
+    }
+  }
+
+  const forward = (owner===1) ? -1 : 1; // note: board y=0 is top (後手側), player is at bottom; forward for 先手 is y-1
+
+  if(!prom){
+    switch(pc){
+      case 'K':
+        for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]){
+          pushMove(x+dx, y+dy, false);
+        } break;
+      case 'G':
+        for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,forward],[-1,forward]]){
+          pushMove(x+dx, y+dy, false);
+        } break;
+      case 'S':
+        for(const [dx,dy] of [[0,forward],[1,forward],[-1,forward],[1,-forward],[-1,-forward]]){
+          pushMove(x+dx, y+dy, true);
+        } break;
+      case 'N':
+        // knight: two forward and one side (only move if inside board)
+        pushMove(x+1, y+2*forward, true);
+        pushMove(x-1, y+2*forward, true);
+        break;
+      case 'L':
+        // lance: slide forward
+        for(let step=1;;step++){
+          const nx = x; const ny = y + step*forward;
+          if(ny<0||ny>8) break;
+          const t = board[ny][nx];
+          if(!t){ pushMove(nx,ny,true); continue; }
+          if(t.owner!==owner){ pushMove(nx,ny,true); }
+          break;
+        }
+        break;
+      case 'P':
+        pushMove(x, y+forward, true);
+        break;
+      case 'R':
+        // orthogonal slides
+        for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+          for(let s=1;;s++){
+            const nx=x+dx*s, ny=y+dy*s;
+            if(nx<0||nx>8||ny<0||ny>8) break;
+            const t = board[ny][nx];
+            pushMove(nx,ny,true);
+            if(t) { if(t.owner!==owner){} break; }
+          }
+        }
+        break;
+      case 'B':
+        for(const [dx,dy] of [[1,1],[1,-1],[-1,1],[-1,-1]]){
+          for(let s=1;;s++){
+            const nx=x+dx*s, ny=y+dy*s;
+            if(nx<0||nx>8||ny<0||ny>8) break;
+            const t = board[ny][nx];
+            pushMove(nx,ny,true);
+            if(t) { if(t.owner!==owner){} break; }
+          }
+        }
+        break;
+    }
+  } else {
+    // promoted pieces: mostly gold-like moves; promoted rook/bishop also have king moves
+    const base = pc;
+    if(base==='R'){
+      // rook moves + one-step diagonals
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        for(let s=1;;s++){
+          const nx=x+dx*s, ny=y+dy*s;
+          if(nx<0||nx>8||ny<0||ny>8) break;
+          const t=board[ny][nx];
+          pushMove(nx,ny,false);
+          if(t){ if(t.owner!==owner){} break; }
+        }
+      }
+      for(const [dx,dy] of [[1,1],[1,-1],[-1,1],[-1,-1]]){
+        pushMove(x+dx, y+dy, false);
+      }
+    } else if(base==='B'){
+      for(const [dx,dy] of [[1,1],[1,-1],[-1,1],[-1,-1]]){
+        for(let s=1;;s++){
+          const nx=x+dx*s, ny=y+dy*s;
+          if(nx<0||nx>8||ny<0||ny>8) break;
+          const t=board[ny][nx];
+          pushMove(nx,ny,false);
+          if(t){ if(t.owner!==owner){} break; }
+        }
+      }
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        pushMove(x+dx, y+dy, false);
+      }
+    } else {
+      // promoted S, N, L, P -> move as Gold
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,forward],[-1,forward]]){
+        pushMove(x+dx, y+dy, false);
+      }
+    }
+  }
+
+  // Filter moves that leave own king in check
+  // Use a simplified check to avoid infinite recursion
+  moves = moves.filter(m=>{
+    const sim = cloneBoard(board);
+    makeSimMove(sim, x,y, m.x,m.y, m.promote);
+    return !isKingInCheckSimple(sim, turn);
+  });
+
+  return moves;
+}
+
+// 判定：成りが可能なゾーン（先手: y<=2 (0,1,2), 後手: y>=6 (6,7,8))
+function isPromotionZone(owner, fromY, toY){
+  if(owner===1){
+    return (fromY<=2) || (toY<=2);
+  } else {
+    return (fromY>=6) || (toY>=6);
+  }
+}
+function forcePromotion(owner, pc, toY){
+  // 歩・香: 最終段に行くと強制成り
+  // 桂: 最終2段に行くと強制成り
+  if(pc==='P' || pc==='L'){
+    if(owner===1 && toY===0) return true;
+    if(owner===-1 && toY===8) return true;
+  }
+  if(pc==='N'){
+    if(owner===1 && toY<=1) return true;
+    if(owner===-1 && toY>=7) return true;
+  }
+  return false;
+}
+
+// シミュレーションでの一手実行（ボードコピーに対して）
+function makeSimMove(simBoard, sx,sy, tx,ty, promote){
+  const piece = simBoard[sy][sx];
+  if(!piece) return;
+  const target = simBoard[ty][tx];
+  // capture -> add to hand (ignored in sim)
+  simBoard[ty][tx] = {pc: piece.pc, owner: piece.owner, prom: promote ? true : false};
+  simBoard[sy][sx] = null;
+}
+
+// 実際の一手実行（捕獲は持ち駒へ）
+function executeMove(sx,sy,tx,ty,promote=false){
+  const piece = board[sy][sx];
+  if(!piece) return;
+  const target = board[ty][tx];
+  if(target){
+    // capture: captured piece becomes owner=turn and unpromoted for hands
+    const capKey = target.pc.toUpperCase(); // uppercase letter
+    // demote when captured: promoted piece captured becomes base piece
+    // e.g., '+P' captured -> 'P'
+    const base = capKey;
+    // add to hands with owner = turn
+    const addKey = base; // P,L,N,S,G,B,R
+    hands[turn][addKey] = (hands[turn][addKey]||0) + 1;
+    appendLog(`${pieceLabel(piece)} が ${pieceLabel(target)} を取った。持ち駒に ${pieceNameByKey(addKey)} を追加`);
+  }
+  // move piece
+  board[ty][tx] = { pc: piece.pc, owner: piece.owner, prom: piece.prom };
+  board[sy][sx] = null;
+  // promotion
+  if(promote){
+    board[ty][tx].prom = true;
+    appendLog(`${pieceLabel(board[ty][tx])} が成った！`);
+  } else {
+    // if forced promotion by move into end ranks
+    if(forcePromotion(piece.owner, piece.pc, ty)) board[ty][tx].prom = true;
+  }
+}
+
+// ドロップ実行
+function executeDrop(owner, pieceKey, x,y){
+  // remove from hands
+  if(!hands[owner][pieceKey] || hands[owner][pieceKey] <= 0){
+    console.warn('drop: no piece in hand');
+    return;
+  }
+  hands[owner][pieceKey] -= 1;
+  if(hands[owner][pieceKey] === 0) delete hands[owner][pieceKey];
+  // place piece with owner
+  board[y][x] = { pc: pieceKey, owner: owner, prom: false };
+  appendLog(`${(owner===1?'先手':'後手')} が ${pieceNameByKey(pieceKey)} を ${x+1}-${y+1} に打った`);
+}
+
+// Drop legality: basic checks: target empty, not drop pawn on file with another pawn (二歩), not drop pawn/lance/knight on last ranks where they cannot move.
+function isLegalDrop(owner, pieceKey, x, y){
+  if(board[y][x] !== null) return false;
+  // pawn specific: no nifu (two pawns in same file for owner)
+  if(pieceKey === 'P'){
+    // check same file for unpromoted pawn owned by owner
+    for(let yy=0;yy<9;yy++){
+      const c = board[yy][x];
+      if(c && c.owner===owner && c.pc==='P' && !c.prom) return false;
+    }
+    // cannot drop pawn on last rank (no moves)
+    if(owner===1 && y===0) return false;
+    if(owner===-1 && y===8) return false;
+    // (※打ち歩詰めの禁止はここでは未実装)
+  }
+  if(pieceKey === 'L'){
+    if(owner===1 && y===0) return false;
+    if(owner===-1 && y===8) return false;
+  }
+  if(pieceKey === 'N'){
+    if(owner===1 && y<=1) return false;
+    if(owner===-1 && y>=7) return false;
+  }
+  return true;
+}
+
+// 次の手番へ
+function nextTurn(){
+  // check for checkmate/stalemate?
+  // switch turn
+  turn = -turn;
+  appendLog(`${turn===1 ? '先手（あなた）' : '後手（AI)'} の番`);
+  render();
+  // if AI's turn and enabled, run AI move
+  if(turn === -1 && aiEnabled){
+    setTimeout(()=>{ aiMove(); }, 300);
+  }
+}
+
+// AI: generate all legal moves for side, evaluate via minimax depth 2
+function aiMove(){
+  statusEl.innerText = 'AI 思考中…';
+  // generate moves for AI (turn === -1)
+  const moves = generateAllLegalMoves(-1);
+  if(moves.length === 0){
+    appendLog('AI の指し手なし（パス/投了）');
+    return;
+  }
+  let best = null;
+  let bestScore = -999999;
+  // simple minimax depth 2: AI move -> opponent best reply -> evaluate
+  for(const mv of moves){
+    const sim = cloneBoard(board);
+    const simHands = JSON.parse(JSON.stringify(hands));
+    applyMoveSim(sim, simHands, mv, -1);
+    const score = minimax(sim, simHands, 1, AI_DEPTH-1, -999999, 999999);
+    if(score > bestScore){ bestScore = score; best = mv; }
+  }
+  if(best){
+    // execute best on real board
+    if(best.drop){
+      executeDrop(-1, best.piece, best.x, best.y);
+    } else {
+      // capture to hands
+      const target = board[best.y][best.x];
+      if(target){
+        const addKey = target.pc.toUpperCase();
+        hands['-1'][addKey] = (hands['-1'][addKey]||0) + 1;
+      }
+      // move piece
+      const moving = board[best.sy][best.sx];
+      board[best.y][best.x] = { pc: moving.pc, owner: moving.owner, prom: best.promote ? true : moving.prom };
+      board[best.sy][best.sx] = null;
+      // mark promotion
+      if(best.promote) board[best.y][best.x].prom = true;
+    }
+    appendLog(`AI は ${moveToText(best)} を指した`);
+    nextTurn();
+  } else {
+    appendLog('AI: 指し手が見つかりませんでした');
+  }
+}
+
+// minimax for sim boards. side is current player (1 or -1).
+function minimax(simBoard, simHands, side, depth, alpha, beta){
+  if(depth===0) return evaluateBoard(simBoard, simHands, side);
+  const moves = generateAllLegalMovesForState(simBoard, simHands, side);
+  if(moves.length===0){
+    // if no moves: evaluate
+    return evaluateBoard(simBoard, simHands, side);
+  }
+  if(side === -1){
+    // maximizing for AI
+    let maxv = -999999;
+    for(const mv of moves){
+      const nb = cloneBoard(simBoard);
+      const nh = JSON.parse(JSON.stringify(simHands));
+      applyMoveSim(nb, nh, mv, side);
+      const v = minimax(nb, nh, -side, depth-1, alpha, beta);
+      if(v > maxv) maxv = v;
+      if(v > alpha) alpha = v;
+      if(beta <= alpha) break;
+    }
+    return maxv;
+  } else {
+    // minimizing for player (we treat player as minimizing AI score)
+    let minv = 999999;
+    for(const mv of moves){
+      const nb = cloneBoard(simBoard);
+      const nh = JSON.parse(JSON.stringify(simHands));
+      applyMoveSim(nb, nh, mv, side);
+      const v = minimax(nb, nh, -side, depth-1, alpha, beta);
+      if(v < minv) minv = v;
+      if(v < beta) beta = v;
+      if(beta <= alpha) break;
+    }
+    return minv;
+  }
+}
+
+// 評価関数：駒価 + 持ち駒重み + 局面の単純重み（王に近い危険等は未実装）
+function evaluateBoard(simBoard, simHands, perspective){
+  // return score from AI viewpoint (higher better for AI (owner -1))
+  let score = 0;
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const c = simBoard[y][x];
+      if(!c) continue;
+      const key = (c.prom ? ('+'+c.pc.toUpperCase()) : c.pc.toUpperCase());
+      const val = PIECE[key] ? PIECE[key].val : 0;
+      // owner -1 (AI) should add positive
+      score += val * (-c.owner); // because owner -1 -> -(-1) = 1 => positive
+      // small positional terms: advanced pawn bonus
+      if(key==='P'){
+        score += (c.owner===-1 ? (8-y)*0.1 : (y)*0.1) * (-c.owner);
+      }
+    }
+  }
+  // hands
+  for(const side of [1,-1]){
+    for(const k in simHands[side]){
+      const cnt = simHands[side][k];
+      const val = PIECE[k].val || 0;
+      score += (-side) * val * cnt * 0.9; // holding a piece is slightly less than on-board
+    }
+  }
+  // from AI perspective already positive is good
+  return score;
+}
+
+/* ----- generate moves for a state (used by AI) ----- */
+function generateAllLegalMoves(side){
+  return generateAllLegalMovesForState(board, hands, side);
+}
+function generateAllLegalMovesForState(simBoard, simHands, side){
+  let moves = [];
+  // board moves
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const c = simBoard[y][x];
+      if(!c || c.owner !== side) continue;
+      // generate moves similar to earlier generateLegalMovesForSquare, but for simBoard
+      const localMoves = generateMovesForSquareInState(simBoard, side, x,y, simHands);
+      for(const m of localMoves) moves.push(m);
+    }
+  }
+  // drops from hands
+  for(const k in simHands[side]){
+    const count = simHands[side][k];
+    if(count<=0) continue;
+    for(let y=0;y<9;y++){
+      for(let x=0;x<9;x++){
+        if(simBoard[y][x]!==null) continue;
+        if(!isLegalDropForState(simBoard, side, k, x,y)) continue;
+        moves.push({drop:true, piece:k, x:x, y:y, owner:side});
+      }
+    }
+  }
+  return moves;
+}
+
+function generateMovesForSquareInState(simBoard, side, x,y, simHands, skipCheckValidation=false){
+  const cell = simBoard[y][x];
+  if(!cell) return [];
+  const owner = cell.owner;
+  const pc = cell.pc;
+  const prom = cell.prom;
+  let moves = [];
+  const forward = (owner===1) ? -1 : 1;
+
+  function push(nx,ny, allowProm){
+    if(nx<0||nx>8||ny<0||ny>8) return;
+    const t = simBoard[ny][nx];
+    if(t && t.owner===owner) return;
+
+    // Skip king safety check if requested (to avoid infinite recursion)
+    if(skipCheckValidation){
+      moves.push({sx:x,sy:y,x:nx,y:ny,promote:promoteWouldBe(prom,allowProm,owner,y,ny,pc), drop:false, sxy:true});
+      return;
+    }
+
+    // legal check by simulating and ensuring own king not in check
+    // create sim board copy
+    const nb = cloneBoard(simBoard);
+    // apply move in nb
+    // capture
+    if(t){
+      // captured piece becomes piece in hand
+      nb[ny][nx] = { pc: pc, owner: owner, prom: prom };
+      nb[y][x] = null;
+    } else {
+      nb[ny][nx] = { pc: pc, owner: owner, prom: promoteWouldBe(prom, allowProm, owner, y, ny, pc) };
+      nb[y][x] = null;
+    }
+    // check king safety
+    if(!isKingInCheck(nb, owner)) {
+      moves.push({sx:x,sy:y,x:nx,y:ny,promote:promoteWouldBe(prom,allowProm,owner,y,ny,pc), drop:false, sxy:true});
+    }
+  }
+
+  if(!prom){
+    switch(pc){
+      case 'K':
+        for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]) push(x+dx,y+dy,false);
+        break;
+      case 'G':
+        for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,forward],[-1,forward]]) push(x+dx,y+dy,false);
+        break;
+      case 'S':
+        for(const [dx,dy] of [[0,forward],[1,forward],[-1,forward],[1,-forward],[-1,-forward]]) push(x+dx,y+dy,true);
+        break;
+      case 'N':
+        push(x+1,y+2*forward,true); push(x-1,y+2*forward,true); break;
+      case 'L':
+        for(let s=1;;s++){
+          const nx=x, ny=y+s*forward;
+          if(ny<0||ny>8) break;
+          const t = simBoard[ny][nx];
+          push(nx,ny,true);
+          if(t) break;
+        }
+        break;
+      case 'P':
+        push(x,y+forward,true); break;
+      case 'R':
+        for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+          for(let s=1;;s++){
+            const nx=x+dx*s, ny=y+dy*s; if(nx<0||nx>8||ny<0||ny>8) break;
+            push(nx,ny,true);
+            if(simBoard[ny][nx]) break;
+          }
+        } break;
+      case 'B':
+        for(const [dx,dy] of [[1,1],[1,-1],[-1,1],[-1,-1]]){
+          for(let s=1;;s++){
+            const nx=x+dx*s, ny=y+dy*s; if(nx<0||nx>8||ny<0||ny>8) break;
+            push(nx,ny,true);
+            if(simBoard[ny][nx]) break;
+          }
+        } break;
+    }
+  } else {
+    // promoted moves
+    const base = pc;
+    if(base==='R'){
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        for(let s=1;;s++){
+          const nx=x+dx*s, ny=y+dy*s; if(nx<0||nx>8||ny<0||ny>8) break;
+          push(nx,ny,false);
+          if(simBoard[ny][nx]) break;
+        }
+      }
+      for(const [dx,dy] of [[1,1],[1,-1],[-1,1],[-1,-1]]) push(x+dx,y+dy,false);
+    } else if(base==='B'){
+      for(const [dx,dy] of [[1,1],[1,-1],[-1,1],[-1,-1]]){
+        for(let s=1;;s++){
+          const nx=x+dx*s, ny=y+dy*s; if(nx<0||nx>8||ny<0||ny>8) break;
+          push(nx,ny,false);
+          if(simBoard[ny][nx]) break;
+        }
+      }
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]) push(x+dx,y+dy,false);
+    } else {
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,forward],[-1,forward]]) push(x+dx,y+dy,false);
+    }
+  }
+  return moves;
+}
+
+// isLegalDrop for sim state (nifu, last rank)
+function isLegalDropForState(simBoard, owner, pieceKey, x,y){
+  if(simBoard[y][x] !== null) return false;
+  if(pieceKey==='P'){
+    // nifu: same file unpromoted pawn
+    for(let yy=0;yy<9;yy++){
+      const c = simBoard[yy][x];
+      if(c && c.owner===owner && c.pc==='P' && !c.prom) return false;
+    }
+    if(owner===1 && y===0) return false;
+    if(owner===-1 && y===8) return false;
+    // drop pawn mate prohibition not implemented
+  }
+  if(pieceKey==='L'){
+    if(owner===1 && y===0) return false;
+    if(owner===-1 && y===8) return false;
+  }
+  if(pieceKey==='N'){
+    if(owner===1 && y<=1) return false;
+    if(owner===-1 && y>=7) return false;
+  }
+  return true;
+}
+
+// simulate apply move (for minimax)
+function applyMoveSim(simBoard, simHands, mv, side){
+  if(mv.drop){
+    // remove from simHands
+    simHands[side][mv.piece] = (simHands[side][mv.piece]||0) - 1;
+    if(simHands[side][mv.piece] <= 0) delete simHands[side][mv.piece];
+    simBoard[mv.y][mv.x] = { pc: mv.piece, owner: side, prom: false};
+  } else {
+    // capture to simHands
+    const tgt = simBoard[mv.y][mv.x];
+    if(tgt){
+      const add = tgt.pc.toUpperCase();
+      simHands[side][add] = (simHands[side][add]||0) + 1;
+    }
+    const mov = simBoard[mv.sy][mv.sx];
+    simBoard[mv.y][mv.x] = { pc: mov.pc, owner: mov.owner, prom: mv.promote ? true : mov.prom };
+    simBoard[mv.sy][mv.sx] = null;
+  }
+}
+
+// Simplified king check without recursion (for player move validation)
+function isKingInCheckSimple(simBoard, owner){
+  // find king coord for owner
+  let kx=-1, ky=-1;
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const c = simBoard[y][x];
+      if(!c) continue;
+      if(c.pc==='K' && c.owner===owner){
+        kx=x; ky=y; break;
+      }
+    }
+    if(kx!==-1) break;
+  }
+  if(kx===-1) return true;
+
+  const forward = (owner===1) ? -1 : 1;
+
+  // Check if any opponent piece attacks the king position
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const c = simBoard[y][x];
+      if(!c || c.owner===owner) continue;
+
+      const pc = c.pc;
+      const prom = c.prom;
+      const oppForward = -forward;
+
+      // Check if this piece can attack (kx,ky) based on piece type
+      if(!prom){
+        if(pc==='K'){
+          const kingMoves = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+          if(kingMoves.some(([dx,dy])=> x+dx===kx && y+dy===ky)) return true;
+        } else if(pc==='G'){
+          const goldMoves = [[1,0],[-1,0],[0,1],[0,-1],[1,oppForward],[-1,oppForward]];
+          if(goldMoves.some(([dx,dy])=> x+dx===kx && y+dy===ky)) return true;
+        } else if(pc==='S'){
+          const silverMoves = [[0,oppForward],[1,oppForward],[-1,oppForward],[1,-oppForward],[-1,-oppForward]];
+          if(silverMoves.some(([dx,dy])=> x+dx===kx && y+dy===ky)) return true;
+        } else if(pc==='N'){
+          if((x+1===kx && y+2*oppForward===ky) || (x-1===kx && y+2*oppForward===ky)) return true;
+        } else if(pc==='P'){
+          if(x===kx && y+oppForward===ky) return true;
+        } else if(pc==='L'){
+          // Lance attacks forward in a line
+          for(let step=1; step<9; step++){
+            const ny = y + step*oppForward;
+            if(ny<0||ny>8) break;
+            if(x===kx && ny===ky) return true;
+            if(simBoard[ny][x]) break;
+          }
+        } else if(pc==='R'){
+          // Rook attacks orthogonally
+          for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+            for(let s=1; s<9; s++){
+              const nx=x+dx*s, ny=y+dy*s;
+              if(nx<0||nx>8||ny<0||ny>8) break;
+              if(nx===kx && ny===ky) return true;
+              if(simBoard[ny][nx]) break;
+            }
+          }
+        } else if(pc==='B'){
+          // Bishop attacks diagonally
+          for(const [dx,dy] of [[1,1],[1,-1],[-1,1],[-1,-1]]){
+            for(let s=1; s<9; s++){
+              const nx=x+dx*s, ny=y+dy*s;
+              if(nx<0||nx>8||ny<0||ny>8) break;
+              if(nx===kx && ny===ky) return true;
+              if(simBoard[ny][nx]) break;
+            }
+          }
+        }
+      } else {
+        // Promoted pieces
+        if(pc==='R'){
+          // Dragon: rook + king moves
+          for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+            for(let s=1; s<9; s++){
+              const nx=x+dx*s, ny=y+dy*s;
+              if(nx<0||nx>8||ny<0||ny>8) break;
+              if(nx===kx && ny===ky) return true;
+              if(simBoard[ny][nx]) break;
+            }
+          }
+          const kingMoves = [[1,1],[1,-1],[-1,1],[-1,-1]];
+          if(kingMoves.some(([dx,dy])=> x+dx===kx && y+dy===ky)) return true;
+        } else if(pc==='B'){
+          // Horse: bishop + king moves
+          for(const [dx,dy] of [[1,1],[1,-1],[-1,1],[-1,-1]]){
+            for(let s=1; s<9; s++){
+              const nx=x+dx*s, ny=y+dy*s;
+              if(nx<0||nx>8||ny<0||ny>8) break;
+              if(nx===kx && ny===ky) return true;
+              if(simBoard[ny][nx]) break;
+            }
+          }
+          const kingMoves = [[1,0],[-1,0],[0,1],[0,-1]];
+          if(kingMoves.some(([dx,dy])=> x+dx===kx && y+dy===ky)) return true;
+        } else {
+          // Other promoted pieces move as gold
+          const goldMoves = [[1,0],[-1,0],[0,1],[0,-1],[1,oppForward],[-1,oppForward]];
+          if(goldMoves.some(([dx,dy])=> x+dx===kx && y+dy===ky)) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// king in check detection for given board and side (owner)
+function isKingInCheck(simBoard, owner){
+  // find king coord for owner
+  let kx=-1, ky=-1;
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const c = simBoard[y][x];
+      if(!c) continue;
+      if((owner===1 && c.pc==='K' && c.owner===1) || (owner===-1 && c.pc==='K' && c.owner===-1)){
+        kx=x; ky=y; break;
+      }
+      // Note: we used 'K' and 'k' in initial; but board stores pc uppercase always; legend: both sides 'K' stored with owner flag. So find owner and pc K
+      if(c.pc==='K' && c.owner===owner){
+        kx=x; ky=y; break;
+      }
+    }
+    if(kx!==-1) break;
+  }
+  if(kx===-1) return true; // no king? treat as check
+
+  // scan all opponent pieces and see if any attacks (kx,ky)
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+      const c = simBoard[y][x];
+      if(!c || c.owner===owner) continue;
+      // generate moves for this piece and see if (kx,ky) contained
+      // Use skipCheckValidation=true to avoid infinite recursion
+      const moves = generateMovesForSquareInState(simBoard, c.owner, x,y, null, true);
+      if(moves.some(m => m.x===kx && m.y===ky)) return true;
+    }
+  }
+  return false;
+}
+
+/* ---------- UI helpers & logs ---------- */
+function appendLog(s){
+  const el = document.createElement('div');
+  el.innerText = s;
+  logEl.prepend(el);
+}
+
+// prepare drop: select a hand piece to drop (selected.drop = true)
+function prepareDrop(owner, pieceKey){
+  if(owner !== turn){
+    statusEl.innerText = '自分の持ち駒を選んでください';
+    return;
+  }
+  selected = { drop:true, piece:pieceKey, owner:owner };
+  legalMoves = []; // for drop we don't highlight yet; user clicks square to drop
+  statusEl.innerText = `打つ駒：${pieceNameByKey(pieceKey)} を置く場所を選んでください`;
+  render();
+}
+
+/* ---------- utilities ---------- */
+function pieceLabel(cell){
+  if(!cell) return '';
+  return `${cell.owner===1 ? '先手':'後手'} ${pieceToLabel(cell)}`;
+}
+function moveToText(m){
+  if(m.drop) return `${m.owner===-1 ? 'AI':'あなた'}: ${pieceNameByKey(m.piece)} 打 ${m.x+1}-${m.y+1}`;
+  return `${m.sx+1}-${m.sy+1} -> ${m.x+1}-${m.y+1}` + (m.promote ? ' 成' : '');
+}
+
+function promoteWouldBe(currentProm, allowProm, owner, fromY, toY, pc){
+  if(currentProm) return true;
+  if(!PIECE[pc].promote) return false;
+  if(allowProm && isPromotionZone(owner, fromY, toY)) return true;
+  if(forcePromotion(owner, pc, toY)) return true;
+  return false;
+}
+
+/* ---------- controls ---------- */
+function restart(){
+  resetBoardFromFen();
+  selected = null; legalMoves = [];
+  turn = 1;
+  logEl.innerHTML = '';
+  appendLog('対局開始：先手（あなた）から');
+  render();
+}
+
+function toggleAIMode(){
+  aiEnabled = !aiEnabled;
+  event.target ? event.target.innerText = aiEnabled ? '{AI:ON}' : '{AI:OFF}' : null;
+  appendLog(`AIモード: ${aiEnabled ? 'ON' : 'OFF'}`);
+}
+
+/* Note: some UI flows such as promotion choice (ユーザに選択させる) - currently we auto-promote when promotion flag true and also present both options for moves where promotion is optional
+   For a more interactive promotion (ユーザーに選択), we could pop up a confirm() when a move offers promote:true and forcePromotion is false.
+   Let's implement a simple confirm for user moves: if user's move has promote option true but not forced, ask confirm('成りますか？')
+*/
+
+// Wrap original executeMove to prompt user if optional promotion chosen
+(function(){
+  const origCellClick = cellClick;
+  // override cellClick to intercept player's move promotion decisions
+  window.cellClick = function(x,y){
+    // handle drop mode
+    if(selected && selected.drop){
+      if(selected.owner !== turn){ selected=null; legalMoves=[]; render(); return; }
+      if(!isLegalDrop(turn, selected.piece, x, y)){ statusEl.innerText='打てません'; selected=null; legalMoves=[]; render(); return; }
+      executeDrop(turn, selected.piece, x, y);
+      selected = null; legalMoves=[]; nextTurn(); return;
+    }
+    const c = board[y][x];
+    if(!c){
+      if(selected && !selected.drop){
+        const m = legalMoves.find(m=> m.x==x && m.y==y);
+        if(m){
+          // if player's move has optional promotion, prompt
+          const pieceObj = board[selected.y][selected.x];
+          const canPromOpt = m.promote && !forcePromotion(pieceObj.owner, pieceObj.pc, m.y);
+          if(canPromOpt && turn===1 && PIECE[pieceObj.pc].promote){
+            const ok = confirm('成りますか？（OK = 成る / キャンセル = 成らない）');
+            executeMove(selected.x, selected.y, x, y, ok);
+          } else {
+            executeMove(selected.x, selected.y, x, y, m.promote);
+          }
+          selected=null; legalMoves=[];
+          nextTurn();
+        } else { selected=null; legalMoves=[]; }
+        render(); return;
+      }
+      selected=null; legalMoves=[]; render(); return;
+    }
+    // selecting piece
+    if(c.owner === turn){
+      selected = {x,y, drop:false};
+      legalMoves = generateLegalMovesForSquare(x,y);
+      render();
+    } else {
+      if(selected && !selected.drop){
+        const m = legalMoves.find(m=> m.x==x && m.y==y);
+        if(m){
+          const pieceObj = board[selected.y][selected.x];
+          const canPromOpt = m.promote && !forcePromotion(pieceObj.owner, pieceObj.pc, m.y);
+          if(canPromOpt && turn===1 && PIECE[pieceObj.pc].promote){
+            const ok = confirm('成りますか？（OK = 成る / キャンセル = 成らない）');
+            executeMove(selected.x, selected.y, x, y, ok);
+          } else {
+            executeMove(selected.x, selected.y, x, y, m.promote);
+          }
+          selected=null; legalMoves=[]; nextTurn();
+        } else { selected=null; legalMoves=[]; }
+        render();
+      } else { selected = null; legalMoves=[]; render(); }
+    }
+  };
+})();
+
+init();
+render();
+
+</script>
+</body>
+</html>

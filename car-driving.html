@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>3D 街ドライブシミュレーター</title>
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+        color: white;
+        font-family: 'Arial', sans-serif;
+        overflow: hidden;
+    }
+    #game-container {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+    }
+    canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+    }
+    #hud {
+        position: absolute;
+        bottom: 30px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0,0,0,0.7);
+        padding: 20px 40px;
+        border-radius: 15px;
+        border: 2px solid rgba(255,255,255,0.3);
+        display: flex;
+        gap: 40px;
+        align-items: center;
+    }
+    .hud-item {
+        text-align: center;
+    }
+    .hud-label {
+        font-size: 12px;
+        color: #aaa;
+        margin-bottom: 5px;
+    }
+    .hud-value {
+        font-size: 32px;
+        font-weight: bold;
+        color: #0f0;
+        text-shadow: 0 0 10px rgba(0,255,0,0.5);
+    }
+    #speedometer {
+        width: 120px;
+        height: 120px;
+        position: relative;
+        background: radial-gradient(circle, #222 60%, #000 100%);
+        border-radius: 50%;
+        border: 3px solid #666;
+    }
+    #speed-needle {
+        position: absolute;
+        width: 3px;
+        height: 50px;
+        background: #f00;
+        bottom: 60px;
+        left: 58.5px;
+        transform-origin: bottom center;
+        transition: transform 0.1s;
+        box-shadow: 0 0 10px rgba(255,0,0,0.8);
+    }
+    .speed-mark {
+        position: absolute;
+        color: #fff;
+        font-size: 10px;
+    }
+    #controls {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        background: rgba(0,0,0,0.7);
+        padding: 15px;
+        border-radius: 10px;
+        font-size: 14px;
+        line-height: 1.8;
+    }
+    #title {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        font-size: 24px;
+        font-weight: bold;
+        text-shadow: 2px 2px 4px #000;
+    }
+    #backBtn {
+        position: absolute;
+        top: 60px;
+        left: 20px;
+        color: #ccc;
+        text-decoration: none;
+        font-size: 16px;
+        text-shadow: 2px 2px 4px #000;
+    }
+    #gameOver {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0,0,0,0.95);
+        padding: 40px 60px;
+        border-radius: 15px;
+        border: 3px solid #f44;
+        display: none;
+        text-align: center;
+    }
+    #gameOver h2 {
+        margin: 0 0 20px;
+        color: #f44;
+        font-size: 36px;
+    }
+    button {
+        padding: 12px 30px;
+        font-size: 18px;
+        cursor: pointer;
+        background: linear-gradient(135deg, #2a7 0%, #1a5 100%);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        margin-top: 20px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    }
+    button:hover {
+        background: linear-gradient(135deg, #3b8 0%, #2b6 100%);
+    }
+</style>
+</head>
+<body>
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="title">🚗 3D 街ドライブシミュレーター</div>
+    <a id="backBtn" href="index.html">← 戻る</a>
+    
+    <div id="controls">
+        <strong>操作方法:</strong><br>
+        ↑ アクセル<br>
+        ↓ ブレーキ<br>
+        ← → ハンドル
+    </div>
+    
+    <div id="hud">
+        <div id="speedometer">
+            <div id="speed-needle"></div>
+            <div class="speed-mark" style="top: 10px; left: 50px;">200</div>
+            <div class="speed-mark" style="bottom: 10px; left: 45px;">0</div>
+        </div>
+        <div class="hud-item">
+            <div class="hud-label">速度</div>
+            <div class="hud-value"><span id="speed">0</span> km/h</div>
+        </div>
+        <div class="hud-item">
+            <div class="hud-label">スコア</div>
+            <div class="hud-value" id="score">0</div>
+        </div>
+    </div>
+    
+    <div id="gameOver">
+        <h2>クラッシュ！</h2>
+        <p style="font-size: 20px;">走行距離: <span id="finalScore">0</span>m</p>
+        <button onclick="restart()">もう一度プレイ</button>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+});
+
+const ROAD_WIDTH = 3000;
+const SEGMENT_LENGTH = 200;
+const CAMERA_DEPTH = 0.84;
+const FOG_DENSITY = 1.2;
+
+let gameRunning = false;
+let score = 0;
+let speed = 0;
+let targetSpeed = 0;
+let maxSpeed = 200;
+let position = 0;
+let playerX = 0;
+let steering = 0;
+
+class RoadSegment {
+    constructor(index) {
+        this.index = index;
+        this.curve = 0;
+        this.z = index * SEGMENT_LENGTH;
+        this.y = Math.sin(index * 0.02) * 500;
+    }
+}
+
+class Building {
+    constructor(z, side) {
+        this.z = z;
+        this.side = side;
+        this.height = 150 + Math.random() * 300;
+        this.width = 100 + Math.random() * 150;
+        this.depth = 80 + Math.random() * 120;
+        this.type = Math.floor(Math.random() * 3);
+        this.windows = [];
+        
+        const floors = Math.floor(this.height / 40);
+        for (let f = 0; f < floors; f++) {
+            for (let w = 0; w < 3; w++) {
+                this.windows.push({
+                    x: w * 25 + 15,
+                    y: f * 40 + 15,
+                    lit: Math.random() < 0.6
+                });
+            }
+        }
+    }
+}
+
+class Car {
+    constructor(z, offset) {
+        this.z = z;
+        this.offset = offset;
+        this.speed = 60 + Math.random() * 80;
+        this.color = ['#f00', '#00f', '#ff0', '#0ff', '#f0f'][Math.floor(Math.random() * 5)];
+    }
+}
+
+class Tree {
+    constructor(z, side, offset) {
+        this.z = z;
+        this.side = side;
+        this.offset = offset;
+        this.height = 100 + Math.random() * 80;
+    }
+}
+
+class Mountain {
+    constructor(index, side) {
+        this.x = side < 0 ? index * 400 : index * 400;
+        this.side = side;
+        this.height = 300 + Math.random() * 200;
+        this.width = 200 + Math.random() * 150;
+        this.color = index % 2 === 0 ? '#6B8E23' : '#556B2F';
+    }
+}
+
+class Cloud {
+    constructor(index) {
+        this.x = index * 350;
+        this.y = 60 + Math.random() * 100;
+        this.size = 30 + Math.random() * 20;
+    }
+}
+
+let segments = [];
+let buildings = [];
+let cars = [];
+let trees = [];
+let mountains = [];
+let clouds = [];
+
+function init() {
+    score = 0;
+    speed = 0;
+    targetSpeed = 0;
+    position = 0;
+    playerX = 0;
+    steering = 0;
+    segments = [];
+    buildings = [];
+    cars = [];
+    trees = [];
+    mountains = [];
+    clouds = [];
+    gameRunning = true;
+    
+    for (let i = 0; i < 10; i++) {
+        mountains.push(new Mountain(i, -1));
+        mountains.push(new Mountain(i, 1));
+    }
+    
+    for (let i = 0; i < 8; i++) {
+        clouds.push(new Cloud(i));
+    }
+    
+    for (let i = 0; i < 500; i++) {
+        const seg = new RoadSegment(i);
+        
+        if (i > 100 && i % 30 === 0) {
+            const curveStrength = (Math.random() - 0.5) * 0.004;
+            for (let j = 0; j < 50; j++) {
+                if (segments[i + j]) {
+                    segments[i + j].curve = curveStrength;
+                }
+            }
+        }
+        
+        segments.push(seg);
+        
+        if (i % 8 === 0) {
+            buildings.push(new Building(i * SEGMENT_LENGTH, -1));
+            buildings.push(new Building(i * SEGMENT_LENGTH, 1));
+        }
+        
+        if (i % 15 === 0) {
+            trees.push(new Tree(i * SEGMENT_LENGTH, -1, 0.5 + Math.random() * 0.3));
+            trees.push(new Tree(i * SEGMENT_LENGTH, 1, 0.5 + Math.random() * 0.3));
+        }
+        
+        if (i > 50 && i % 25 === 0 && Math.random() < 0.6) {
+            cars.push(new Car(i * SEGMENT_LENGTH, (Math.random() - 0.5) * 0.7));
+        }
+    }
+    
+    document.getElementById('gameOver').style.display = 'none';
+    updateDisplay();
+    requestAnimationFrame(gameLoop);
+}
+
+let lastTime = 0;
+
+function gameLoop(time) {
+    if (!gameRunning) return;
+    
+    const dt = Math.min((time - lastTime) / 1000, 0.1);
+    lastTime = time;
+    
+    if (dt > 0) {
+        update(dt);
+        render();
+    }
+    
+    requestAnimationFrame(gameLoop);
+}
+
+function update(dt) {
+    const acceleration = 80;
+    const braking = 150;
+    const friction = 30;
+    
+    if (targetSpeed > speed) {
+        speed = Math.min(speed + acceleration * dt, targetSpeed);
+    } else if (targetSpeed < speed) {
+        speed = Math.max(speed - braking * dt, targetSpeed);
+    } else {
+        if (speed > 0) {
+            speed = Math.max(speed - friction * dt, 0);
+        }
+    }
+    
+    position += speed * dt * 10;
+    
+    if (position >= segments.length * SEGMENT_LENGTH - 2000) {
+        const newSegments = [];
+        for (let i = 0; i < 100; i++) {
+            const idx = segments.length + i;
+            const seg = new RoadSegment(idx);
+            newSegments.push(seg);
+        }
+        segments.push(...newSegments);
+    }
+    
+    const baseSegment = Math.floor(position / SEGMENT_LENGTH);
+    if (segments[baseSegment]) {
+        playerX += segments[baseSegment].curve * speed * dt * 2;
+        playerX += steering * dt * 1.5;
+    }
+    
+    playerX = Math.max(-1.1, Math.min(1.1, playerX));
+    
+    if (Math.abs(playerX) > 0.9) {
+        gameOver();
+        return;
+    }
+    
+    cars.forEach(car => {
+        const carZ = car.z - position;
+        if (carZ > -200 && carZ < 200) {
+            if (Math.abs(playerX - car.offset) < 0.2) {
+                gameOver();
+                return;
+            }
+        }
+    });
+    
+    if (speed > 0) {
+        score += speed * dt;
+    }
+    
+    updateDisplay();
+}
+
+function render() {
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    const gradient = ctx.createLinearGradient(0, 0, 0, height);
+    gradient.addColorStop(0, '#87CEEB');
+    gradient.addColorStop(0.5, '#B0D4E3');
+    gradient.addColorStop(1, '#90EE90');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+    
+    ctx.fillStyle = '#FFD700';
+    ctx.beginPath();
+    ctx.arc(width * 0.8, height * 0.15, 40, 0, Math.PI * 2);
+    ctx.fill();
+    
+    clouds.forEach(cloud => {
+        const cloudX = (cloud.x - position * 0.02) % (width + 200);
+        if (cloudX < -100) return;
+        const cloudY = cloud.y;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.beginPath();
+        ctx.arc(cloudX, cloudY, cloud.size, 0, Math.PI * 2);
+        ctx.arc(cloudX + cloud.size * 0.8, cloudY, cloud.size * 1.2, 0, Math.PI * 2);
+        ctx.arc(cloudX + cloud.size * 1.8, cloudY, cloud.size, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    
+    mountains.forEach(mountain => {
+        const mountainX = mountain.side < 0 ? 
+            (mountain.x - position * 0.05) % (width / 2) :
+            width / 2 + (mountain.x - position * 0.05) % (width / 2);
+        
+        const peakY = height * 0.4 - mountain.height * 0.3;
+        const baseY = height * 0.4;
+        
+        ctx.fillStyle = mountain.color;
+        ctx.beginPath();
+        ctx.moveTo(mountainX - mountain.width / 2, baseY);
+        ctx.lineTo(mountainX, peakY);
+        ctx.lineTo(mountainX + mountain.width / 2, baseY);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.beginPath();
+        ctx.moveTo(mountainX - 20, peakY + 20);
+        ctx.lineTo(mountainX, peakY);
+        ctx.lineTo(mountainX + 15, peakY + 25);
+        ctx.closePath();
+        ctx.fill();
+    });
+    
+    const baseSegment = Math.floor(position / SEGMENT_LENGTH);
+    let curveOffset = 0;
+    
+    for (let n = 150; n >= 0; n--) {
+        const segment = segments[baseSegment + n];
+        if (!segment) continue;
+        
+        const projectedZ = n * SEGMENT_LENGTH;
+        if (projectedZ <= 1) continue;
+        
+        const scale = CAMERA_DEPTH / projectedZ;
+        const projectedY = height / 2 + segment.y * scale;
+        const projectedW = scale * ROAD_WIDTH * width / 2;
+        
+        curveOffset += segment.curve * projectedZ;
+        const projectedX = width / 2 - projectedW - curveOffset * width;
+        
+        const fog = Math.min(1, projectedZ / (SEGMENT_LENGTH * FOG_DENSITY * 100));
+        
+        const grassBrightness = 35 + fog * 30;
+        ctx.fillStyle = `hsl(120, 50%, ${grassBrightness}%)`;
+        ctx.fillRect(0, projectedY, width, height - projectedY);
+        
+        const roadBrightness = n % 2 === 0 ? 30 : 28;
+        ctx.fillStyle = `hsl(0, 0%, ${roadBrightness}%)`;
+        ctx.fillRect(projectedX, projectedY, projectedW * 2, height - projectedY);
+        
+        if (n % 5 === 0) {
+            ctx.fillStyle = `rgba(255, 255, 255, ${1 - fog})`;
+            const lineW = scale * 15;
+            ctx.fillRect(projectedX + projectedW - lineW / 2, projectedY, lineW, scale * 80);
+        }
+        
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.8 - fog})`;
+        ctx.lineWidth = scale * 5;
+        ctx.beginPath();
+        ctx.moveTo(projectedX, projectedY);
+        ctx.lineTo(projectedX, height);
+        ctx.moveTo(projectedX + projectedW * 2, projectedY);
+        ctx.lineTo(projectedX + projectedW * 2, height);
+        ctx.stroke();
+        
+        trees.forEach(tree => {
+            const treeZ = tree.z - position;
+            if (Math.abs(treeZ - projectedZ) < SEGMENT_LENGTH / 2) {
+                const tScale = CAMERA_DEPTH / treeZ;
+                const tHeight = tScale * tree.height;
+                const tX = tree.side < 0 ? 
+                    projectedX - tScale * 100 * tree.offset : 
+                    projectedX + projectedW * 2 + tScale * 100 * tree.offset;
+                const tY = projectedY - tHeight;
+                
+                if (tScale > 0.01 && treeZ > 0) {
+                    const treeFog = Math.min(1, treeZ / (SEGMENT_LENGTH * FOG_DENSITY * 100));
+                    ctx.fillStyle = `rgba(101, 67, 33, ${1 - treeFog})`;
+                    ctx.fillRect(tX - tScale * 10, tY + tHeight * 0.6, tScale * 20, tHeight * 0.4);
+                    ctx.fillStyle = `rgba(34, 139, 34, ${1 - treeFog})`;
+                    ctx.beginPath();
+                    ctx.arc(tX, tY + tHeight * 0.3, tScale * 40, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        });
+        
+        buildings.forEach(building => {
+            const buildingZ = building.z - position;
+            if (Math.abs(buildingZ - projectedZ) < SEGMENT_LENGTH) {
+                const bScale = CAMERA_DEPTH / buildingZ;
+                const bHeight = bScale * building.height;
+                const bWidth = bScale * building.width;
+                const bDepth = bScale * building.depth;
+                const bX = building.side < 0 ? 
+                    projectedX - bWidth - bScale * 200 : 
+                    projectedX + projectedW * 2 + bScale * 200;
+                const bY = projectedY - bHeight;
+                
+                if (bScale > 0.01 && buildingZ > 0) {
+                    const bFog = Math.min(1, buildingZ / (SEGMENT_LENGTH * FOG_DENSITY * 100));
+                    
+                    const baseBrightness = 40 - building.type * 5;
+                    const frontColor = `hsl(0, 0%, ${baseBrightness}%)`;
+                    const sideColor = `hsl(0, 0%, ${baseBrightness - 10}%)`;
+                    
+                    ctx.globalAlpha = 1 - bFog;
+                    
+                    if (building.side > 0) {
+                        ctx.fillStyle = sideColor;
+                        ctx.beginPath();
+                        ctx.moveTo(bX, bY);
+                        ctx.lineTo(bX - bDepth * 0.5, bY - bDepth * 0.3);
+                        ctx.lineTo(bX - bDepth * 0.5, bY + bHeight - bDepth * 0.3);
+                        ctx.lineTo(bX, bY + bHeight);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                    
+                    ctx.fillStyle = frontColor;
+                    ctx.fillRect(bX, bY, bWidth, bHeight);
+                    
+                    building.windows.forEach(win => {
+                        if (win.lit) {
+                            const wX = bX + bScale * win.x;
+                            const wY = bY + bScale * win.y;
+                            const wSize = bScale * 15;
+                            ctx.fillStyle = `rgba(255, 255, 200, ${0.8 - bFog})`;
+                            ctx.fillRect(wX, wY, wSize, wSize * 1.2);
+                        }
+                    });
+                    
+                    ctx.globalAlpha = 1;
+                }
+            }
+        });
+        
+        cars.forEach(car => {
+            const carZ = car.z - position;
+            if (Math.abs(carZ - projectedZ) < SEGMENT_LENGTH / 2) {
+                const cScale = CAMERA_DEPTH / carZ;
+                const cWidth = cScale * 90;
+                const cHeight = cScale * 60;
+                const cDepth = cScale * 120;
+                const cX = projectedX + projectedW + car.offset * projectedW - cWidth / 2;
+                const cY = projectedY - cHeight;
+                
+                if (cScale > 0.01 && carZ > 0) {
+                    const cFog = Math.min(1, carZ / (SEGMENT_LENGTH * FOG_DENSITY * 100));
+                    ctx.globalAlpha = 1 - cFog;
+                    
+                    ctx.fillStyle = car.color;
+                    ctx.fillRect(cX, cY, cWidth, cHeight);
+                    ctx.fillRect(cX + cWidth * 0.1, cY - cDepth * 0.3, cWidth * 0.8, cDepth * 0.3);
+                    
+                    ctx.fillStyle = 'rgba(100, 150, 200, 0.6)';
+                    ctx.fillRect(cX + cWidth * 0.15, cY - cDepth * 0.25, cWidth * 0.3, cDepth * 0.2);
+                    ctx.fillRect(cX + cWidth * 0.55, cY - cDepth * 0.25, cWidth * 0.3, cDepth * 0.2);
+                    
+                    ctx.fillStyle = '#222';
+                    const wheelSize = cScale * 15;
+                    ctx.fillRect(cX, cY + cHeight - wheelSize, wheelSize, wheelSize);
+                    ctx.fillRect(cX + cWidth - wheelSize, cY + cHeight - wheelSize, wheelSize, wheelSize);
+                    
+                    ctx.globalAlpha = 1;
+                }
+            }
+        });
+    }
+    
+    const carWidth = 120;
+    const carHeight = 80;
+    const carDepth = 180;
+    const carX = width / 2 + playerX * width / 4 - carWidth / 2;
+    const carY = height - carHeight - 60;
+    
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+    ctx.shadowBlur = 20;
+    ctx.shadowOffsetY = 10;
+    
+    ctx.fillStyle = '#1a5fb4';
+    ctx.fillRect(carX, carY, carWidth, carHeight);
+    
+    ctx.fillStyle = '#2a7fc4';
+    ctx.fillRect(carX + carWidth * 0.1, carY - carDepth * 0.3, carWidth * 0.8, carDepth * 0.3);
+    
+    ctx.fillStyle = 'rgba(100, 150, 200, 0.7)';
+    ctx.fillRect(carX + carWidth * 0.15, carY - carDepth * 0.25, carWidth * 0.3, carDepth * 0.2);
+    ctx.fillRect(carX + carWidth * 0.55, carY - carDepth * 0.25, carWidth * 0.3, carDepth * 0.2);
+    
+    ctx.fillStyle = '#0a3f74';
+    ctx.fillRect(carX, carY + carHeight * 0.6, carWidth, carHeight * 0.4);
+    
+    ctx.fillStyle = '#1a1a1a';
+    const wheelWidth = 20;
+    const wheelHeight = 25;
+    ctx.fillRect(carX - 5, carY + carHeight - wheelHeight - 5, wheelWidth, wheelHeight);
+    ctx.fillRect(carX + carWidth - wheelWidth + 5, carY + carHeight - wheelHeight - 5, wheelWidth, wheelHeight);
+    
+    if (speed > 0) {
+        ctx.fillStyle = '#ff0';
+        ctx.fillRect(carX + 5, carY + carHeight - 8, 15, 5);
+        ctx.fillRect(carX + carWidth - 20, carY + carHeight - 8, 15, 5);
+    }
+    
+    ctx.fillStyle = '#f00';
+    ctx.fillRect(carX + 5, carY + carHeight - 3, 10, 3);
+    ctx.fillRect(carX + carWidth - 15, carY + carHeight - 3, 10, 3);
+    
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+}
+
+function updateDisplay() {
+    document.getElementById('speed').textContent = Math.floor(speed);
+    document.getElementById('score').textContent = Math.floor(score);
+    
+    const speedAngle = (speed / maxSpeed) * 180 - 90;
+    document.getElementById('speed-needle').style.transform = `rotate(${speedAngle}deg)`;
+}
+
+function gameOver() {
+    gameRunning = false;
+    document.getElementById('finalScore').textContent = Math.floor(score);
+    document.getElementById('gameOver').style.display = 'block';
+}
+
+function restart() {
+    init();
+}
+
+let keys = {};
+
+document.addEventListener('keydown', (e) => {
+    keys[e.code] = true;
+    if (e.code.startsWith('Arrow')) {
+        e.preventDefault();
+    }
+});
+
+document.addEventListener('keyup', (e) => {
+    keys[e.code] = false;
+});
+
+setInterval(() => {
+    if (!gameRunning) return;
+    
+    if (keys['ArrowUp']) {
+        targetSpeed = maxSpeed;
+    } else if (keys['ArrowDown']) {
+        targetSpeed = 0;
+    } else {
+        targetSpeed = speed * 0.95;
+    }
+    
+    if (keys['ArrowLeft']) {
+        steering = Math.max(steering - 0.05, -0.8);
+    } else if (keys['ArrowRight']) {
+        steering = Math.min(steering + 0.05, 0.8);
+    } else {
+        steering *= 0.85;
+    }
+}, 1000 / 60);
+
+init();
+</script>
+</body>
+</html>
