@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Narrow One - 3D弓矢対戦</title>
+<style>
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
+    }
+    body {
+        font-family: 'Arial', sans-serif;
+        background: #000;
+        color: white;
+        overflow: hidden;
+        touch-action: none;
+    }
+    #gameCanvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+    }
+    #hud {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        padding: 15px;
+        pointer-events: none;
+        z-index: 100;
+    }
+    #topBar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(0, 0, 0, 0.8);
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-size: clamp(14px, 3vw, 20px);
+    }
+    .team-score {
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .team-blue { color: #4dabf7; }
+    .team-red { color: #ff6b6b; }
+    #timer { color: #ffd43b; }
+    #centerHUD {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+    }
+    #crosshair {
+        width: 20px;
+        height: 20px;
+        border: 2px solid rgba(255, 255, 255, 0.9);
+        border-radius: 50%;
+    }
+    #bottomHUD {
+        position: fixed;
+        bottom: 80px;
+        left: 50%;
+        transform: translateX(-50%);
+        text-align: center;
+        pointer-events: none;
+    }
+    #ammoCounter {
+        font-size: clamp(18px, 4vw, 24px);
+        background: rgba(0, 0, 0, 0.8);
+        padding: 10px 30px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+    }
+    #healthBar {
+        width: 200px;
+        height: 8px;
+        background: rgba(0, 0, 0, 0.5);
+        border-radius: 5px;
+        overflow: hidden;
+        margin: 0 auto;
+    }
+    #healthBarFill {
+        height: 100%;
+        background: linear-gradient(90deg, #ff6b6b 0%, #51cf66 100%);
+        width: 100%;
+        transition: width 0.3s;
+    }
+    #mobileControls {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 200px;
+        display: none;
+        pointer-events: auto;
+        z-index: 150;
+    }
+    #joystick {
+        position: absolute;
+        left: 30px;
+        bottom: 30px;
+        width: 120px;
+        height: 120px;
+        background: rgba(255, 255, 255, 0.2);
+        border: 3px solid rgba(255, 255, 255, 0.4);
+        border-radius: 50%;
+    }
+    #joystickStick {
+        position: absolute;
+        width: 50px;
+        height: 50px;
+        background: rgba(255, 255, 255, 0.6);
+        border-radius: 50%;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        transition: all 0.1s;
+    }
+    #shootButton {
+        position: absolute;
+        right: 30px;
+        bottom: 90px;
+        width: 80px;
+        height: 80px;
+        background: rgba(255, 100, 100, 0.7);
+        border: 3px solid rgba(255, 100, 100, 0.9);
+        border-radius: 50%;
+        font-size: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: auto;
+    }
+    #shootButton:active {
+        background: rgba(255, 100, 100, 0.9);
+        transform: scale(0.95);
+    }
+    #reloadButton {
+        position: absolute;
+        right: 30px;
+        bottom: 20px;
+        padding: 12px 20px;
+        background: rgba(100, 100, 255, 0.7);
+        border: 2px solid rgba(100, 100, 255, 0.9);
+        border-radius: 8px;
+        font-size: 16px;
+        color: white;
+        pointer-events: auto;
+    }
+    #reloadButton:active {
+        background: rgba(100, 100, 255, 0.9);
+    }
+    #respawnScreen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.9);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+        z-index: 200;
+    }
+    #respawnScreen h2 {
+        font-size: clamp(24px, 6vw, 48px);
+        margin-bottom: 20px;
+    }
+    #respawnTimer {
+        font-size: clamp(36px, 10vw, 72px);
+        color: #ffd43b;
+    }
+    #startScreen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.95);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+        z-index: 300;
+    }
+    #startScreen h1 {
+        font-size: clamp(32px, 8vw, 64px);
+        margin-bottom: 30px;
+        color: #4dabf7;
+    }
+    .start-btn {
+        padding: 15px 40px;
+        font-size: clamp(16px, 4vw, 24px);
+        background: linear-gradient(135deg, #4dabf7 0%, #339af0 100%);
+        border: none;
+        border-radius: 10px;
+        color: white;
+        cursor: pointer;
+        margin: 10px;
+        transition: all 0.3s;
+    }
+    .start-btn:active {
+        transform: scale(0.95);
+    }
+    #controls {
+        margin-top: 30px;
+        text-align: center;
+        font-size: clamp(12px, 3vw, 16px);
+        color: #aaa;
+        max-width: 90%;
+    }
+    #controls div { margin: 5px 0; }
+    #gameOver {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.95);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+        z-index: 400;
+    }
+    #gameOver h1 {
+        font-size: clamp(32px, 8vw, 72px);
+        margin-bottom: 20px;
+    }
+    .winner-blue { color: #4dabf7; }
+    .winner-red { color: #ff6b6b; }
+    #finalScore {
+        font-size: clamp(24px, 6vw, 48px);
+        margin: 20px 0;
+    }
+    @media (max-width: 768px) {
+        #mobileControls { display: block; }
+        #controls { font-size: 12px; }
+    }
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+
+<div id="startScreen">
+    <h1>🏹 NARROW ONE</h1>
+    <button class="start-btn" onclick="startGame()">ゲーム開始</button>
+    <a href="index.html" style="color: #ccc; text-decoration: none; margin-top: 20px;">← 戻る</a>
+    <div id="controls">
+        <div><strong>操作方法</strong></div>
+        <div>PC: WASD移動 / マウス視点 / 左クリック射撃 / R リロード</div>
+        <div>モバイル: 左ジョイスティック移動 / スワイプ視点 / 射撃ボタン</div>
+    </div>
+</div>
+
+<div id="hud">
+    <div id="topBar">
+        <div class="team-score team-blue">
+            <span>🔵</span>
+            <span id="blueScore">0</span>
+        </div>
+        <div id="timer">5:00</div>
+        <div class="team-score team-red">
+            <span id="redScore">0</span>
+            <span>🔴</span>
+        </div>
+    </div>
+</div>
+
+<div id="centerHUD">
+    <div id="crosshair"></div>
+</div>
+
+<div id="bottomHUD">
+    <div id="ammoCounter">
+        🏹 <span id="currentAmmo">5</span> / <span id="maxAmmo">5</span>
+    </div>
+    <div id="healthBar">
+        <div id="healthBarFill"></div>
+    </div>
+</div>
+
+<div id="mobileControls">
+    <div id="joystick">
+        <div id="joystickStick"></div>
+    </div>
+    <div id="shootButton">🏹</div>
+    <div id="reloadButton">R</div>
+</div>
+
+<div id="respawnScreen">
+    <h2>撃破された！</h2>
+    <div id="respawnTimer">5</div>
+</div>
+
+<div id="gameOver">
+    <h1 id="winnerText"></h1>
+    <div id="finalScore"></div>
+    <button class="start-btn" onclick="location.reload()">もう一度</button>
+    <a href="index.html" style="color: #ccc; text-decoration: none; margin-top: 20px;">← 戻る</a>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+});
+
+// Game state
+let gameStarted = false;
+let gameTime = 300;
+let blueScore = 0;
+let redScore = 0;
+let lastTime = Date.now();
+
+// Player
+const player = {
+    x: 30,
+    y: 100,
+    z: 0,
+    vx: 0,
+    vy: 0,
+    angle: 0,
+    pitch: 0,
+    team: 'blue',
+    health: 100,
+    maxHealth: 100,
+    ammo: 5,
+    maxAmmo: 5,
+    bowCharge: 0,
+    isCharging: false,
+    isDead: false,
+    respawnTime: 0,
+    speed: 0.15
+};
+
+// Controls
+const keys = {};
+let joystickActive = false;
+let joystickX = 0;
+let joystickY = 0;
+let touchStartX = 0;
+let touchStartY = 0;
+
+// Mobile controls
+const joystick = document.getElementById('joystick');
+const joystickStick = document.getElementById('joystickStick');
+const shootButton = document.getElementById('shootButton');
+const reloadButton = document.getElementById('reloadButton');
+
+let joystickTouchId = null;
+let lookTouchId = null;
+
+joystick.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const touch = e.changedTouches[0];
+    joystickTouchId = touch.identifier;
+    joystickActive = true;
+    updateJoystick(touch);
+});
+
+document.addEventListener('touchmove', (e) => {
+    for (let touch of e.changedTouches) {
+        if (touch.identifier === joystickTouchId) {
+            e.preventDefault();
+            updateJoystick(touch);
+        } else if (touch.identifier === lookTouchId) {
+            e.preventDefault();
+            const dx = touch.clientX - touchStartX;
+            const dy = touch.clientY - touchStartY;
+            player.angle += dx * 0.003;
+            player.pitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, player.pitch - dy * 0.003));
+            touchStartX = touch.clientX;
+            touchStartY = touch.clientY;
+        }
+    }
+});
+
+document.addEventListener('touchend', (e) => {
+    for (let touch of e.changedTouches) {
+        if (touch.identifier === joystickTouchId) {
+            joystickActive = false;
+            joystickX = 0;
+            joystickY = 0;
+            joystickStick.style.transform = 'translate(-50%, -50%)';
+            joystickTouchId = null;
+        } else if (touch.identifier === lookTouchId) {
+            lookTouchId = null;
+        }
+    }
+});
+
+canvas.addEventListener('touchstart', (e) => {
+    if (lookTouchId === null && e.changedTouches[0].identifier !== joystickTouchId) {
+        const touch = e.changedTouches[0];
+        lookTouchId = touch.identifier;
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+    }
+});
+
+function updateJoystick(touch) {
+    const rect = joystick.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    
+    let dx = touch.clientX - centerX;
+    let dy = touch.clientY - centerY;
+    
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const maxDistance = 35;
+    
+    if (distance > maxDistance) {
+        dx = (dx / distance) * maxDistance;
+        dy = (dy / distance) * maxDistance;
+    }
+    
+    joystickX = dx / maxDistance;
+    joystickY = dy / maxDistance;
+    
+    joystickStick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+}
+
+shootButton.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (!player.isCharging && player.ammo > 0 && !player.isDead) {
+        player.isCharging = true;
+        player.bowCharge = 0;
+    }
+});
+
+shootButton.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    if (player.isCharging) {
+        shootArrow();
+        player.isCharging = false;
+        player.bowCharge = 0;
+    }
+});
+
+reloadButton.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    reload();
+});
+
+// Keyboard
+document.addEventListener('keydown', (e) => {
+    keys[e.key.toLowerCase()] = true;
+    if (e.key.toLowerCase() === 'r') reload();
+});
+
+document.addEventListener('keyup', (e) => {
+    keys[e.key.toLowerCase()] = false;
+});
+
+// Mouse
+canvas.addEventListener('mousedown', (e) => {
+    if (e.button === 0 && !player.isCharging && player.ammo > 0 && !player.isDead) {
+        player.isCharging = true;
+        player.bowCharge = 0;
+    }
+});
+
+canvas.addEventListener('mouseup', (e) => {
+    if (e.button === 0 && player.isCharging) {
+        shootArrow();
+        player.isCharging = false;
+        player.bowCharge = 0;
+    }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+    if (gameStarted) {
+        player.angle += e.movementX * 0.002;
+        player.pitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, player.pitch - e.movementY * 0.002));
+    }
+});
+
+canvas.addEventListener('click', () => {
+    if (gameStarted) {
+        canvas.requestPointerLock();
+    }
+});
+
+// Bots
+const bots = [];
+const BOT_COUNT = 9;
+
+class Bot {
+    constructor(team, id) {
+        this.id = id;
+        this.team = team;
+        this.spawn();
+        this.angle = Math.random() * Math.PI * 2;
+        this.pitch = 0;
+        this.isCharging = false;
+        this.bowCharge = 0;
+        this.ammo = 5;
+        this.maxAmmo = 5;
+        this.health = 100;
+        this.maxHealth = 100;
+        this.isDead = false;
+        this.respawnTime = 0;
+        this.target = null;
+        this.thinkTimer = 0;
+        this.shootCooldown = 0;
+    }
+    
+    spawn() {
+        if (this.team === 'blue') {
+            this.x = 10 + Math.random() * 40;
+            this.y = 80 + Math.random() * 40;
+        } else {
+            this.x = 150 + Math.random() * 40;
+            this.y = 80 + Math.random() * 40;
+        }
+        this.z = 0;
+        this.vx = 0;
+        this.vy = 0;
+        this.health = this.maxHealth;
+        this.isDead = false;
+        this.ammo = this.maxAmmo;
+    }
+    
+    update(dt) {
+        if (this.isDead) {
+            this.respawnTime -= dt;
+            if (this.respawnTime <= 0) this.spawn();
+            return;
+        }
+        
+        this.thinkTimer -= dt;
+        this.shootCooldown -= dt;
+        
+        if (this.thinkTimer <= 0) {
+            this.thinkTimer = 0.5 + Math.random();
+            
+            let nearestEnemy = null;
+            let nearestDist = Infinity;
+            
+            if (!player.isDead && player.team !== this.team) {
+                const dist = Math.hypot(player.x - this.x, player.y - this.y);
+                if (dist < nearestDist) {
+                    nearestDist = dist;
+                    nearestEnemy = player;
+                }
+            }
+            
+            for (const bot of bots) {
+                if (bot !== this && !bot.isDead && bot.team !== this.team) {
+                    const dist = Math.hypot(bot.x - this.x, bot.y - this.y);
+                    if (dist < nearestDist) {
+                        nearestDist = dist;
+                        nearestEnemy = bot;
+                    }
+                }
+            }
+            
+            this.target = nearestEnemy;
+        }
+        
+        // Movement
+        const speed = 0.12;
+        
+        if (this.target) {
+            const dx = this.target.x - this.x;
+            const dy = this.target.y - this.y;
+            const dist = Math.hypot(dx, dy);
+            
+            if (dist > 60) {
+                this.vx = (dx / dist) * speed;
+                this.vy = (dy / dist) * speed;
+            } else if (dist < 30) {
+                this.vx = -(dx / dist) * speed;
+                this.vy = -(dy / dist) * speed;
+            } else {
+                this.vx = -(dy / dist) * speed * (Math.random() > 0.5 ? 1 : -1);
+                this.vy = (dx / dist) * speed * (Math.random() > 0.5 ? 1 : -1);
+            }
+            
+            // Aim at target
+            this.angle = Math.atan2(dy, dx);
+            const targetDist = Math.hypot(dx, dy);
+            this.pitch = -Math.atan2(5, targetDist);
+            
+            // Shoot
+            if (dist < 80 && this.ammo > 0 && this.shootCooldown <= 0 && Math.random() < 0.05) {
+                this.shootArrow();
+                this.shootCooldown = 1 + Math.random() * 2;
+            }
+        } else {
+            this.vx *= 0.9;
+            this.vy *= 0.9;
+        }
+        
+        this.x += this.vx;
+        this.y += this.vy;
+        
+        this.x = Math.max(5, Math.min(195, this.x));
+        this.y = Math.max(5, Math.min(195, this.y));
+        
+        if (this.ammo === 0 && Math.random() < 0.02) {
+            this.ammo = this.maxAmmo;
+        }
+    }
+    
+    shootArrow() {
+        if (this.ammo <= 0) return;
+        this.ammo--;
+        
+        const speed = 2.5;
+        arrows.push(new Arrow(
+            this.x, this.y, 5,
+            Math.cos(this.angle) * speed,
+            Math.sin(this.angle) * speed,
+            Math.sin(this.pitch) * speed,
+            this.team, this
+        ));
+    }
+    
+    takeDamage(damage, attacker) {
+        this.health -= damage;
+        if (this.health <= 0) this.die(attacker);
+    }
+    
+    die(killer) {
+        this.isDead = true;
+        this.respawnTime = 5;
+        
+        if (killer && killer.team !== this.team) {
+            if (killer.team === 'blue') blueScore++;
+            else redScore++;
+            updateScore();
+        }
+    }
+}
+
+// Arrows
+const arrows = [];
+
+class Arrow {
+    constructor(x, y, z, vx, vy, vz, team, shooter) {
+        this.x = x;
+        this.y = y;
+        this.z = z;
+        this.vx = vx;
+        this.vy = vy;
+        this.vz = vz;
+        this.team = team;
+        this.shooter = shooter;
+        this.life = 3;
+    }
+    
+    update(dt) {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.z += this.vz;
+        this.vz -= 0.2;
+        this.life -= dt;
+        
+        if (this.z <= 0) return true;
+        
+        // Hit detection
+        if (!player.isDead && this.shooter !== player && player.team !== this.team) {
+            if (Math.hypot(player.x - this.x, player.y - this.y) < 2) {
+                player.takeDamage(50, this.shooter);
+                return true;
+            }
+        }
+        
+        for (const bot of bots) {
+            if (!bot.isDead && this.shooter !== bot && bot.team !== this.team) {
+                if (Math.hypot(bot.x - this.x, bot.y - this.y) < 2) {
+                    bot.takeDamage(50, this.shooter);
+                    return true;
+                }
+            }
+        }
+        
+        return this.life <= 0;
+    }
+}
+
+function initBots() {
+    bots.length = 0;
+    for (let i = 0; i < BOT_COUNT; i++) {
+        const team = i < BOT_COUNT / 2 ? 'blue' : 'red';
+        bots.push(new Bot(team, i + 1));
+    }
+}
+
+function shootArrow() {
+    if (player.ammo <= 0 || player.isDead) return;
+    
+    player.ammo--;
+    updateAmmo();
+    
+    const power = Math.min(player.bowCharge, 1);
+    const speed = 1.5 + power * 1.5;
+    
+    arrows.push(new Arrow(
+        player.x, player.y, 5,
+        Math.cos(player.angle) * speed,
+        Math.sin(player.angle) * speed,
+        Math.sin(player.pitch) * speed,
+        player.team, player
+    ));
+}
+
+player.takeDamage = function(damage, attacker) {
+    this.health -= damage;
+    updateHealth();
+    if (this.health <= 0) this.die(attacker);
+};
+
+player.die = function(killer) {
+    this.isDead = true;
+    this.respawnTime = 5;
+    
+    if (killer && killer.team !== player.team) {
+        if (killer.team === 'red') redScore++;
+        updateScore();
+    }
+    
+    showRespawnScreen();
+};
+
+player.spawn = function() {
+    this.x = 30;
+    this.y = 100;
+    this.z = 0;
+    this.health = this.maxHealth;
+    this.isDead = false;
+    this.ammo = this.maxAmmo;
+    updateAmmo();
+    updateHealth();
+};
+
+function reload() {
+    if (player.ammo < player.maxAmmo && !player.isDead) {
+        player.ammo = player.maxAmmo;
+        updateAmmo();
+    }
+}
+
+function updateScore() {
+    document.getElementById('blueScore').textContent = blueScore;
+    document.getElementById('redScore').textContent = redScore;
+}
+
+function updateAmmo() {
+    document.getElementById('currentAmmo').textContent = player.ammo;
+}
+
+function updateHealth() {
+    const percent = (player.health / player.maxHealth) * 100;
+    document.getElementById('healthBarFill').style.width = percent + '%';
+}
+
+function updateTimer() {
+    const minutes = Math.floor(gameTime / 60);
+    const seconds = Math.floor(gameTime % 60);
+    document.getElementById('timer').textContent = 
+        `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function showRespawnScreen() {
+    document.getElementById('respawnScreen').style.display = 'flex';
+    const timerEl = document.getElementById('respawnTimer');
+    
+    const interval = setInterval(() => {
+        player.respawnTime -= 0.1;
+        timerEl.textContent = Math.ceil(player.respawnTime);
+        
+        if (player.respawnTime <= 0) {
+            clearInterval(interval);
+            player.spawn();
+            document.getElementById('respawnScreen').style.display = 'none';
+        }
+    }, 100);
+}
+
+function startGame() {
+    document.getElementById('startScreen').style.display = 'none';
+    gameStarted = true;
+    initBots();
+    player.spawn();
+    updateScore();
+    updateAmmo();
+    updateHealth();
+    lastTime = Date.now();
+    gameLoop();
+}
+
+function gameLoop() {
+    if (!gameStarted) return;
+    
+    const now = Date.now();
+    const dt = Math.min((now - lastTime) / 1000, 0.1);
+    lastTime = now;
+    
+    // Update game time
+    gameTime -= dt;
+    updateTimer();
+    
+    if (gameTime <= 0) {
+        endGame();
+        return;
+    }
+    
+    // Update player
+    if (!player.isDead) {
+        let moveX = 0;
+        let moveY = 0;
+        
+        if (keys['w']) moveY -= 1;
+        if (keys['s']) moveY += 1;
+        if (keys['a']) moveX -= 1;
+        if (keys['d']) moveX += 1;
+        
+        if (joystickActive) {
+            moveX += joystickX;
+            moveY += joystickY;
+        }
+        
+        if (moveX || moveY) {
+            const len = Math.sqrt(moveX * moveX + moveY * moveY);
+            moveX /= len;
+            moveY /= len;
+            
+            const cos = Math.cos(player.angle);
+            const sin = Math.sin(player.angle);
+            
+            player.vx = (moveX * cos - moveY * sin) * player.speed;
+            player.vy = (moveX * sin + moveY * cos) * player.speed;
+        } else {
+            player.vx *= 0.9;
+            player.vy *= 0.9;
+        }
+        
+        player.x += player.vx;
+        player.y += player.vy;
+        
+        player.x = Math.max(5, Math.min(195, player.x));
+        player.y = Math.max(5, Math.min(195, player.y));
+        
+        if (player.isCharging) {
+            player.bowCharge += dt * 1.5;
+        }
+    }
+    
+    // Update bots
+    for (const bot of bots) {
+        bot.update(dt);
+    }
+    
+    // Update arrows
+    for (let i = arrows.length - 1; i >= 0; i--) {
+        if (arrows[i].update(dt)) {
+            arrows.splice(i, 1);
+        }
+    }
+    
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+function render() {
+    // Sky
+    const skyGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    skyGradient.addColorStop(0, '#87CEEB');
+    skyGradient.addColorStop(1, '#E0F6FF');
+    ctx.fillStyle = skyGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Ground
+    const groundGradient = ctx.createLinearGradient(0, canvas.height * 0.55
