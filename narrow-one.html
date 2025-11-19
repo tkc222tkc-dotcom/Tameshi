@@ -9,17 +9,20 @@
         margin: 0;
         padding: 0;
         box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
     }
     body {
         font-family: 'Arial', sans-serif;
         background: #000;
         color: white;
         overflow: hidden;
+        touch-action: none;
     }
     #gameCanvas {
         display: block;
         width: 100vw;
         height: 100vh;
+        background: #000;
     }
     #hud {
         position: fixed;
@@ -54,6 +57,7 @@
         left: 50%;
         transform: translate(-50%, -50%);
         pointer-events: none;
+        z-index: 100;
     }
     #crosshair {
         width: 20px;
@@ -68,6 +72,7 @@
         transform: translateX(-50%);
         text-align: center;
         pointer-events: none;
+        z-index: 100;
     }
     #ammoCounter {
         font-size: 24px;
@@ -107,6 +112,7 @@
         font-size: 64px;
         margin-bottom: 30px;
         color: #4dabf7;
+        text-shadow: 0 0 20px #4dabf7;
     }
     .start-btn {
         padding: 15px 40px;
@@ -121,6 +127,7 @@
     }
     .start-btn:hover {
         transform: scale(1.05);
+        box-shadow: 0 0 20px #4dabf7;
     }
     #controls {
         margin-top: 30px;
@@ -146,8 +153,8 @@
         font-size: 72px;
         margin-bottom: 20px;
     }
-    .winner-blue { color: #4dabf7; }
-    .winner-red { color: #ff6b6b; }
+    .winner-blue { color: #4dabf7; text-shadow: 0 0 30px #4dabf7; }
+    .winner-red { color: #ff6b6b; text-shadow: 0 0 30px #ff6b6b; }
     #finalScore {
         font-size: 48px;
         margin: 20px 0;
@@ -168,6 +175,7 @@
     #respawnScreen h2 {
         font-size: 48px;
         margin-bottom: 20px;
+        color: #ff6b6b;
     }
     #respawnTimer {
         font-size: 72px;
@@ -251,12 +259,6 @@
         height: 70vh;
         pointer-events: auto;
         z-index: 50;
-        background: rgba(255, 255, 0, 0.0);
-    }
-    .castle {
-        position: absolute;
-        background: #8B7355;
-        border: 2px solid #654321;
     }
     @media (max-width: 1024px) {
         #mobileControls { display: block; }
@@ -273,7 +275,7 @@
 
 <div id="startScreen">
     <h1>🏹 NARROW ONE</h1>
-    <button class="start-btn" onclick="startGame()">ゲーム開始</button>
+    <button class="start-btn" id="startBtn">ゲーム開始</button>
     <a href="index.html" style="color: #ccc; text-decoration: none; margin-top: 20px;">← 戻る</a>
     <div id="controls">
         <div><strong>操作方法</strong></div>
@@ -284,7 +286,7 @@
 
 <div id="lookArea"></div>
 
-<div id="hud">
+<div id="hud" style="display: none;">
     <div id="topBar">
         <div class="team-score team-blue">
             <span>🔵 青チーム</span>
@@ -298,11 +300,11 @@
     </div>
 </div>
 
-<div id="centerHUD">
+<div id="centerHUD" style="display: none;">
     <div id="crosshair"></div>
 </div>
 
-<div id="bottomHUD">
+<div id="bottomHUD" style="display: none;">
     <div id="ammoCounter">
         🏹 <span id="currentAmmo">5</span> / <span id="maxAmmo">5</span>
     </div>
@@ -319,27 +321,28 @@
 <div id="gameOver">
     <h1 id="winnerText"></h1>
     <div id="finalScore"></div>
-    <button class="start-btn" onclick="location.reload()">もう一度</button>
+    <button class="start-btn" id="restartBtn">もう一度</button>
     <a href="index.html" style="color: #ccc; text-decoration: none; margin-top: 20px;">← 戻る</a>
+</div>
+
+<div id="mobileControls">
+    <div id="joystick">
+        <div id="joystickStick"></div>
+    </div>
+    <div id="shootButton">🏹</div>
+    <div id="reloadButton">リロード</div>
 </div>
 
 <script>
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
-
-window.addEventListener('resize', () => {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-});
-
 let gameStarted = false;
 let gameTime = 300;
 let blueScore = 0;
 let redScore = 0;
-let lastTime = Date.now();
+let lastTime = 0;
+let animationFrameId = null;
 
 const player = {
     x: 30, y: 100, z: 0,
@@ -360,11 +363,22 @@ const bots = [];
 const arrows = [];
 const BOT_COUNT = 9;
 
+let joystickActive = false;
+let joystickX = 0;
+let joystickY = 0;
+
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
 class Bot {
     constructor(team, id) {
         this.id = id;
         this.team = team;
-        this.spawn();
         this.angle = Math.random() * Math.PI * 2;
         this.pitch = 0;
         this.vx = 0;
@@ -378,6 +392,7 @@ class Bot {
         this.target = null;
         this.thinkTimer = 0;
         this.shootCooldown = 0;
+        this.spawn();
     }
     
     spawn() {
@@ -526,7 +541,7 @@ class Arrow {
         
         if (!player.isDead && this.shooter !== player && player.team !== this.team) {
             if (Math.hypot(player.x - this.x, player.y - this.y) < 2 && this.z < 10) {
-                player.takeDamage(50, this.shooter);
+                playerTakeDamage(50, this.shooter);
                 return true;
             }
         }
@@ -570,15 +585,15 @@ function shootArrow() {
     ));
 }
 
-player.takeDamage = function(damage, attacker) {
-    this.health -= damage;
+function playerTakeDamage(damage, attacker) {
+    player.health -= damage;
     updateHealth();
-    if (this.health <= 0) this.die(attacker);
-};
+    if (player.health <= 0) playerDie(attacker);
+}
 
-player.die = function(killer) {
-    this.isDead = true;
-    this.respawnTime = 5;
+function playerDie(killer) {
+    player.isDead = true;
+    player.respawnTime = 5;
     
     if (killer && killer.team !== player.team) {
         if (killer.team === 'red') redScore++;
@@ -586,18 +601,18 @@ player.die = function(killer) {
     }
     
     showRespawnScreen();
-};
+}
 
-player.spawn = function() {
-    this.x = 30;
-    this.y = 100;
-    this.z = 0;
-    this.health = this.maxHealth;
-    this.isDead = false;
-    this.ammo = this.maxAmmo;
+function playerSpawn() {
+    player.x = 30;
+    player.y = 100;
+    player.z = 0;
+    player.health = player.maxHealth;
+    player.isDead = false;
+    player.ammo = player.maxAmmo;
     updateAmmo();
     updateHealth();
-};
+}
 
 function reload() {
     if (player.ammo < player.maxAmmo && !player.isDead) {
@@ -616,7 +631,7 @@ function updateAmmo() {
 }
 
 function updateHealth() {
-    const percent = (player.health / player.maxHealth) * 100;
+    const percent = Math.max(0, (player.health / player.maxHealth) * 100);
     document.getElementById('healthBarFill').style.width = percent + '%';
 }
 
@@ -637,7 +652,7 @@ function showRespawnScreen() {
         
         if (player.respawnTime <= 0) {
             clearInterval(interval);
-            player.spawn();
+            playerSpawn();
             document.getElementById('respawnScreen').style.display = 'none';
         }
     }, 100);
@@ -645,20 +660,39 @@ function showRespawnScreen() {
 
 function startGame() {
     document.getElementById('startScreen').style.display = 'none';
+    document.getElementById('hud').style.display = 'block';
+    document.getElementById('centerHUD').style.display = 'block';
+    document.getElementById('bottomHUD').style.display = 'block';
+    
     gameStarted = true;
+    gameTime = 300;
+    blueScore = 0;
+    redScore = 0;
+    
     initBots();
-    player.spawn();
+    playerSpawn();
     updateScore();
     updateAmmo();
     updateHealth();
-    canvas.requestPointerLock();
-    lastTime = Date.now();
+    
+    if (canvas.requestPointerLock) {
+        canvas.requestPointerLock();
+    }
+    
+    lastTime = performance.now();
     gameLoop();
 }
 
 function endGame() {
     gameStarted = false;
-    document.exitPointerLock();
+    if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+    }
+    
+    if (document.exitPointerLock) {
+        document.exitPointerLock();
+    }
     
     const gameOverEl = document.getElementById('gameOver');
     const winnerTextEl = document.getElementById('winnerText');
@@ -689,35 +723,142 @@ document.addEventListener('keyup', (e) => {
 });
 
 canvas.addEventListener('mousedown', (e) => {
-    if (e.button === 0 && !player.isCharging && player.ammo > 0 && !player.isDead) {
+    if (e.button === 0 && !player.isCharging && player.ammo > 0 && !player.isDead && gameStarted) {
         player.isCharging = true;
         player.bowCharge = 0;
     }
 });
 
 canvas.addEventListener('mouseup', (e) => {
-    if (e.button === 0 && player.isCharging) {
+    if (e.button === 0 && player.isCharging && gameStarted) {
         shootArrow();
         player.isCharging = false;
         player.bowCharge = 0;
     }
 });
 
-canvas.addEventListener('mousemove', (e) => {
-    if (gameStarted && document.pointerLockElement === canvas) {
+document.addEventListener('pointerlockchange', handlePointerLockChange);
+document.addEventListener('mozpointerlockchange', handlePointerLockChange);
+
+function handlePointerLockChange() {
+    if (document.pointerLockElement === canvas || document.mozPointerLockElement === canvas) {
+        document.addEventListener('mousemove', handleMouseMove);
+    } else {
+        document.removeEventListener('mousemove', handleMouseMove);
+    }
+}
+
+function handleMouseMove(e) {
+    if (gameStarted) {
         player.angle += e.movementX * 0.002;
         player.pitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, player.pitch - e.movementY * 0.002));
     }
-});
+}
 
 canvas.addEventListener('click', () => {
-    if (gameStarted) canvas.requestPointerLock();
+    if (gameStarted && !document.pointerLockElement) {
+        canvas.requestPointerLock();
+    }
+});
+
+const joystick = document.getElementById('joystick');
+const joystickStick = document.getElementById('joystickStick');
+const shootButton = document.getElementById('shootButton');
+const reloadButton = document.getElementById('reloadButton');
+const lookArea = document.getElementById('lookArea');
+
+joystick.addEventListener('touchstart', handleJoystickStart);
+joystick.addEventListener('touchmove', handleJoystickMove);
+joystick.addEventListener('touchend', handleJoystickEnd);
+
+function handleJoystickStart(e) {
+    e.preventDefault();
+    joystickActive = true;
+}
+
+function handleJoystickMove(e) {
+    e.preventDefault();
+    if (!joystickActive) return;
+    
+    const touch = e.touches[0];
+    const rect = joystick.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    
+    let dx = touch.clientX - centerX;
+    let dy = touch.clientY - centerY;
+    
+    const distance = Math.min(Math.hypot(dx, dy), 50);
+    const angle = Math.atan2(dy, dx);
+    
+    dx = Math.cos(angle) * distance;
+    dy = Math.sin(angle) * distance;
+    
+    joystickStick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    
+    joystickX = dx / 50;
+    joystickY = dy / 50;
+}
+
+function handleJoystickEnd(e) {
+    e.preventDefault();
+    joystickActive = false;
+    joystickX = 0;
+    joystickY = 0;
+    joystickStick.style.transform = 'translate(-50%, -50%)';
+}
+
+shootButton.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (!player.isCharging && player.ammo > 0 && !player.isDead && gameStarted) {
+        player.isCharging = true;
+        player.bowCharge = 0;
+    }
+});
+
+shootButton.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    if (player.isCharging && gameStarted) {
+        shootArrow();
+        player.isCharging = false;
+        player.bowCharge = 0;
+    }
+});
+
+reloadButton.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    reload();
+});
+
+let lastTouchX = 0;
+let lastTouchY = 0;
+
+lookArea.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    lastTouchX = touch.clientX;
+    lastTouchY = touch.clientY;
+});
+
+lookArea.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (!gameStarted) return;
+    
+    const touch = e.touches[0];
+    const dx = touch.clientX - lastTouchX;
+    const dy = touch.clientY - lastTouchY;
+    
+    player.angle += dx * 0.01;
+    player.pitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, player.pitch - dy * 0.01));
+    
+    lastTouchX = touch.clientX;
+    lastTouchY = touch.clientY;
 });
 
 function gameLoop() {
     if (!gameStarted) return;
     
-    const now = Date.now();
+    const now = performance.now();
     const dt = Math.min((now - lastTime) / 1000, 0.1);
     lastTime = now;
     
@@ -737,6 +878,11 @@ function gameLoop() {
         if (keys['s']) moveY += 1;
         if (keys['a']) moveX -= 1;
         if (keys['d']) moveX += 1;
+        
+        if (joystickActive) {
+            moveX += joystickX;
+            moveY += joystickY;
+        }
         
         if (moveX || moveY) {
             const len = Math.sqrt(moveX * moveX + moveY * moveY);
@@ -770,7 +916,7 @@ function gameLoop() {
     }
     
     render();
-    requestAnimationFrame(gameLoop);
+    animationFrameId = requestAnimationFrame(gameLoop);
 }
 
 function render() {
@@ -790,10 +936,6 @@ function render() {
     ctx.fillRect(0, h * 0.5, w, h * 0.5);
     
     const entities = [];
-    
-    if (!player.isDead) {
-        entities.push({type: 'player', obj: player});
-    }
     
     for (const bot of bots) {
         if (!bot.isDead) {
@@ -819,7 +961,7 @@ function render() {
         const rotX = dx * Math.cos(-player.angle) - dy * Math.sin(-player.angle);
         const rotY = dx * Math.sin(-player.angle) + dy * Math.cos(-player.angle);
         
-        if (rotY <= 0.1 || entity.obj === player) continue;
+        if (rotY <= 0.1) continue;
         
         const scale = 400 / rotY;
         const screenX = w / 2 + rotX * scale;
@@ -833,12 +975,7 @@ function render() {
         } else {
             const size = scale * 3;
             
-            if (entity.type === 'bot') {
-                ctx.fillStyle = obj.team === 'blue' ? '#4dabf7' : '#ff6b6b';
-            } else {
-                ctx.fillStyle = '#2f9e44';
-            }
-            
+            ctx.fillStyle = obj.team === 'blue' ? '#4dabf7' : '#ff6b6b';
             ctx.fillRect(screenX - size / 2, screenY - size, size, size * 2);
             
             ctx.fillStyle = '#fff';
@@ -870,6 +1007,11 @@ function render() {
         ctx.fillRect(x, y, barWidth * chargePercent, barHeight);
     }
 }
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('restartBtn').addEventListener('click', () => {
+    location.reload();
+});
 </script>
 </body>
 </html>
