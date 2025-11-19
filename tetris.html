@@ -33,12 +33,6 @@
         margin-top: 15px;
         flex-wrap: wrap;
     }
-    #left-panel, #right-panel {
-        background: rgba(0, 0, 0, 0.5);
-        padding: 15px;
-        border-radius: 10px;
-        border: 2px solid rgba(255, 255, 255, 0.1);
-    }
     #board-container {
         position: relative;
     }
@@ -91,6 +85,7 @@
         border-radius: 8px;
         margin: 10px 0;
         border: 2px solid rgba(255, 255, 255, 0.2);
+        min-width: 150px;
     }
     .preview-box h3 {
         margin: 0 0 10px 0;
@@ -109,6 +104,13 @@
         height: 25px;
         background: rgba(30, 30, 40, 0.5);
         border-radius: 2px;
+    }
+    
+    #right-panel {
+        background: rgba(0, 0, 0, 0.5);
+        padding: 15px;
+        border-radius: 10px;
+        border: 2px solid rgba(255, 255, 255, 0.1);
     }
     
     #stats {
@@ -185,7 +187,7 @@
             flex-direction: column;
             align-items: center;
         }
-        .controls { display: none; }
+        .keyboard-controls { display: none; }
     }
     
     #particles {
@@ -215,13 +217,6 @@
 <a href="index.html">← 戻る</a>
 
 <div id="game-container">
-    <div id="left-panel">
-        <div class="preview-box">
-            <h3>HOLD</h3>
-            <div class="preview-grid" id="hold-preview"></div>
-        </div>
-    </div>
-    
     <div id="board-container">
         <div id="board"></div>
         <div id="particles"></div>
@@ -251,25 +246,24 @@
         <button onclick="togglePause()">一時停止</button>
         <button onclick="restart()">リスタート</button>
         
-        <div class="controls" style="margin-top: 15px; font-size: 12px; color: #aaa;">
+        <div class="keyboard-controls" style="margin-top: 15px; font-size: 12px; color: #aaa;">
             <div>← → : 移動</div>
             <div>↓ : 高速落下</div>
             <div>↑ Z : 回転</div>
-            <div>Space : 即座に落下</div>
-            <div>C : ホールド</div>
+            <div>Space : 一気に落とす</div>
         </div>
     </div>
 </div>
 
 <div id="touch-controls">
-    <div class="touch-btn" ontouchstart="handleTouch('rotate')">↻</div>
-    <div class="touch-btn" ontouchstart="handleTouch('up')">↑</div>
-    <div class="touch-btn" ontouchstart="handleTouch('hold')">HOLD</div>
-    <div class="touch-btn" ontouchstart="handleTouch('left')">←</div>
-    <div class="touch-btn" ontouchstart="handleTouch('down')">↓</div>
-    <div class="touch-btn" ontouchstart="handleTouch('right')">→</div>
+    <div class="touch-btn" onpointerdown="handleTouch('rotate')">↻</div>
+    <div class="touch-btn" onpointerdown="handleTouch('up')">↑</div>
     <div></div>
-    <div class="touch-btn" ontouchstart="handleTouch('drop')" style="grid-column: span 2;">DROP</div>
+    <div class="touch-btn" onpointerdown="handleTouch('left')">←</div>
+    <div class="touch-btn" onpointerdown="handleTouch('down')">↓</div>
+    <div class="touch-btn" onpointerdown="handleTouch('right')">→</div>
+    <div></div>
+    <div class="touch-btn" onpointerdown="handleTouch('drop')" style="grid-column: span 2;">一気に落とす</div>
 </div>
 
 <script>
@@ -288,8 +282,6 @@ const SHAPES = [
 let board = [];
 let currentPiece = null;
 let nextPiece = null;
-let holdPiece = null;
-let canHold = true;
 let currentX = 0;
 let currentY = 0;
 let score = 0;
@@ -298,15 +290,12 @@ let level = 1;
 let gameInterval = null;
 let isPaused = false;
 let gameOver = false;
-let lastMoveTime = 0;
-let moveDelay = 100;
 
 const boardEl = document.getElementById('board');
 const scoreEl = document.getElementById('score');
 const levelEl = document.getElementById('level');
 const linesEl = document.getElementById('lines');
 const nextPreviewEl = document.getElementById('next-preview');
-const holdPreviewEl = document.getElementById('hold-preview');
 const particlesEl = document.getElementById('particles');
 
 function init() {
@@ -316,8 +305,6 @@ function init() {
     level = 1;
     gameOver = false;
     isPaused = false;
-    holdPiece = null;
-    canHold = true;
     
     boardEl.innerHTML = '';
     
@@ -356,7 +343,6 @@ function gameLoop() {
         if (cleared > 0) {
             createLineClearEffect(cleared);
         }
-        canHold = true;
         spawnPiece();
         
         if (checkCollision(currentPiece.shape, currentX, currentY)) {
@@ -378,29 +364,8 @@ function spawnPiece() {
     updatePreviews();
 }
 
-function holdCurrentPiece() {
-    if (!canHold || gameOver || isPaused) return;
-    
-    canHold = false;
-    
-    if (holdPiece === null) {
-        holdPiece = currentPiece;
-        spawnPiece();
-    } else {
-        const temp = currentPiece;
-        currentPiece = holdPiece;
-        holdPiece = temp;
-        currentX = Math.floor(COLS / 2) - Math.floor(currentPiece.shape[0].length / 2);
-        currentY = 0;
-    }
-    
-    updatePreviews();
-    render();
-}
-
 function updatePreviews() {
     renderPreview(nextPreviewEl, nextPiece);
-    renderPreview(holdPreviewEl, holdPiece);
 }
 
 function renderPreview(container, piece) {
@@ -452,10 +417,6 @@ function moveDown() {
 }
 
 function moveLeft() {
-    const now = Date.now();
-    if (now - lastMoveTime < moveDelay) return;
-    lastMoveTime = now;
-    
     if (!checkCollision(currentPiece.shape, currentX - 1, currentY)) {
         currentX--;
         render();
@@ -463,10 +424,6 @@ function moveLeft() {
 }
 
 function moveRight() {
-    const now = Date.now();
-    if (now - lastMoveTime < moveDelay) return;
-    lastMoveTime = now;
-    
     if (!checkCollision(currentPiece.shape, currentX + 1, currentY)) {
         currentX++;
         render();
@@ -505,7 +462,6 @@ function hardDrop() {
     if (cleared > 0) {
         createLineClearEffect(cleared);
     }
-    canHold = true;
     spawnPiece();
     if (checkCollision(currentPiece.shape, currentX, currentY)) {
         gameOver = true;
@@ -686,7 +642,6 @@ function handleTouch(action) {
         case 'up':
         case 'rotate': rotate(); break;
         case 'drop': hardDrop(); break;
-        case 'hold': holdCurrentPiece(); break;
     }
 }
 
@@ -709,9 +664,6 @@ document.addEventListener('keydown', (e) => {
     } else if (e.key === ' ') {
         e.preventDefault();
         hardDrop();
-    } else if (e.key === 'c' || e.key === 'C') {
-        e.preventDefault();
-        holdCurrentPiece();
     }
 });
 
